@@ -173,6 +173,14 @@
                 align-items: center;
             }
         }
+        /**
+        .control-section.collapsed > .control-row {
+            display: none;
+        }
+        .control-section.collapsed > .control-group {
+            display: none;
+        }
+        */
     </style>
 </head>
 <body>
@@ -291,6 +299,43 @@
                 </div>
             </div>
 
+
+
+            <!-- LFO 2 -->
+            <div class="control-section">
+                <div class="section-title">LFO 2</div>
+                <div class="control-row">
+                    <label>Target:</label>
+                    <select id="lfo2Target">
+                        <option value="none">None</option>
+                        <option value="filter" selected>Filter Cutoff</option>
+                        <option value="osc1">Osc 1 Freq</option>
+                        <option value="osc2">Osc 2 Freq</option>
+                        <option value="amplitude">Amplitude</option>
+                    </select>
+                </div>
+                <div class="control-row">
+                    <label>Rate:</label>
+                    <input type="range" id="lfo2Rate" min="0.1" max="20" value="0.5" step="0.1">
+                    <span class="value-display" id="lfo2RateValue">0.5 Hz</span>
+                </div>
+                <div class="control-row">
+                    <label>Depth:</label>
+                    <input type="range" id="lfo2Depth" min="0" max="1" value="0.3" step="0.01">
+                    <span class="value-display" id="lfo2DepthValue">0.30</span>
+                </div>
+                <div class="control-row">
+                    <label>Waveform:</label>
+                    <select id="lfo2Waveform">
+                        <option value="sine" selected>Sine</option>
+                        <option value="square">Square</option>
+                        <option value="sawtooth">Sawtooth</option>
+                        <option value="triangle">Triangle</option>
+                    </select>
+                </div>
+            </div>
+
+
             <!-- Delay Effect -->
             <div class="control-section">
                 <div class="section-title">Delay</div>
@@ -333,7 +378,7 @@
 
             <!-- Master -->
             <div class="control-section">
-                <div class="section-title">Master</div>
+                <div class="section-title">Master</div> 
                 <div class="control-row">
                     <label>Volume:</label>
                     <input type="range" id="masterVolume" min="0" max="1" value="0.7" step="0.01">
@@ -358,6 +403,8 @@
                 this.nodes = {};
                 this.lfo = null;
                 this.lfoGain = null;
+                this.lfo2 = null;
+                this.lfo2Gain = null;
                 this.analyser = null;
                 this.visualizer = null;
                 
@@ -386,6 +433,10 @@
                 // Create LFO
                 this.lfo = this.audioContext.createOscillator();
                 this.lfoGain = this.audioContext.createGain();
+
+                // Create LFO 2
+                this.lfo2 = this.audioContext.createOscillator();
+                this.lfo2Gain = this.audioContext.createGain();
                 
                 // Create delay
                 this.nodes.delay = this.audioContext.createDelay(1.0);
@@ -434,6 +485,10 @@
                 this.lfo.type = 'sine';
                 this.lfo.frequency.setValueAtTime(0.5, this.audioContext.currentTime);
                 this.lfoGain.gain.setValueAtTime(300, this.audioContext.currentTime);
+
+                this.lfo2.type = 'sine';
+                this.lfo2.frequency.setValueAtTime(0.5, this.audioContext.currentTime);
+                this.lfo2Gain.gain.setValueAtTime(300, this.audioContext.currentTime);
                 
                 this.nodes.delay.delayTime.setValueAtTime(0.3, this.audioContext.currentTime);
                 this.nodes.delayFeedback.gain.setValueAtTime(0.4, this.audioContext.currentTime);
@@ -506,6 +561,10 @@
                 // Connect LFO to filter cutoff by default
                 this.lfo.connect(this.lfoGain);
                 this.lfoGain.connect(this.nodes.filter.frequency);
+
+                // Connect LFO2 to filter cutoff by default
+                this.lfo2.connect(this.lfo2Gain);
+                this.lfo2Gain.connect(this.nodes.filter.frequency);
             }
 
             updateDistortion(amount) {
@@ -550,6 +609,30 @@
                 }
             }
 
+            updateLFO2Target(target) {
+                // Disconnect current LFO connection
+                this.lfo2Gain.disconnect();
+                
+                switch (target) {
+                    case 'filter':
+                        this.lfo2Gain.connect(this.nodes.filter.frequency);
+                        break;
+                    case 'osc1':
+                        this.lfo2Gain.connect(this.nodes.osc1.frequency);
+                        break;
+                    case 'osc2':
+                        this.lfo2Gain.connect(this.nodes.osc2.frequency);
+                        break;
+                    case 'amplitude':
+                        this.lfo2Gain.connect(this.nodes.mixer.gain);
+                        break;
+                    case 'none':
+                    default:
+                        // Don't connect to anything
+                        break;
+                }
+            }
+
             start() {
                 if (this.isPlaying) return;
                 
@@ -561,21 +644,25 @@
                 this.nodes.osc1 = this.audioContext.createOscillator();
                 this.nodes.osc2 = this.audioContext.createOscillator();
                 this.lfo = this.audioContext.createOscillator();
+                this.lfo2 = this.audioContext.createOscillator();
                 
                 // Restore oscillator settings
                 this.updateOscillator(1);
                 this.updateOscillator(2);
                 this.updateLFO();
+                this.updateLFO2();
                 
                 // Reconnect oscillators
                 this.nodes.osc1.connect(this.nodes.osc1Gain);
                 this.nodes.osc2.connect(this.nodes.osc2Gain);
                 this.lfo.connect(this.lfoGain);
+                this.lfo2.connect(this.lfo2Gain);
                 
                 // Start oscillators
                 this.nodes.osc1.start();
                 this.nodes.osc2.start();
                 this.lfo.start();
+                this.lfo2.start();
                 
                 this.isPlaying = true;
                 this.startVisualization();
@@ -587,6 +674,7 @@
                 this.nodes.osc1.stop();
                 this.nodes.osc2.stop();
                 this.lfo.stop();
+                this.lfo2.stop();
                 
                 this.isPlaying = false;
                 this.stopVisualization();
@@ -637,6 +725,38 @@
                 }
                 
                 this.updateLFOTarget(target);
+            }
+
+
+            updateLFO2() {
+                const rate = parseFloat(document.getElementById('lfo2Rate').value);
+                const depth = parseFloat(document.getElementById('lfo2Depth').value);
+                const waveform = document.getElementById('lfo2Waveform').value;
+                const target = document.getElementById('lfo2Target').value;
+                
+                if (this.lfo2) {
+                    this.lfo2.type = waveform;
+                    this.lfo2.frequency.setValueAtTime(rate, this.audioContext.currentTime);
+                    
+                    // Adjust LFO depth based on target
+                    let depthValue = depth;
+                    switch (target) {
+                        case 'filter':
+                            depthValue *= 500; // Filter cutoff range
+                            break;
+                        case 'osc1':
+                        case 'osc2':
+                            depthValue *= 50; // Frequency modulation range
+                            break;
+                        case 'amplitude':
+                            depthValue *= 0.5; // Amplitude modulation range
+                            break;
+                    }
+                    
+                    this.lfo2Gain.gain.setValueAtTime(depthValue, this.audioContext.currentTime);
+                }
+                
+                this.updateLFO2Target(target);
             }
 
             initializeVisualizer() {
@@ -768,6 +888,30 @@
                         this.updateLFO();
                     });
                 });
+
+                // LFO 2 controls
+                ['lfo2Target', 'lfo2Waveform'].forEach(id => {
+                    document.getElementById(id).addEventListener('change', () => {
+                        this.updateLFO2();
+                    });
+                });
+                
+                ['lfo2Rate', 'lfo2Depth'].forEach(id => {
+                    const input = document.getElementById(id);
+                    const valueDisplay = document.getElementById(id + 'Value');
+                    
+                    input.addEventListener('input', () => {
+                        const value = parseFloat(input.value);
+                        
+                        if (id === 'lfo2Rate') {
+                            valueDisplay.textContent = `${value} Hz`;
+                        } else if (id === 'lfo2Depth') {
+                            valueDisplay.textContent = value.toFixed(2);
+                        }
+                        
+                        this.updateLFO2();
+                    });
+                });
                 
                 // Delay controls
                 document.getElementById('delayTime').addEventListener('input', (e) => {
@@ -862,6 +1006,14 @@
         document.addEventListener('DOMContentLoaded', () => {
             synth = new DroneSynth();
         });
+
+        // [...document.querySelectorAll(".section-title")].forEach(title => {
+        //     title.addEventListener("click", () => {
+        //         const section = title.parentElement;
+        //         section.classList.toggle("collapsed");
+        //     });
+        // });
+
     </script>
 </body>
 </html>
