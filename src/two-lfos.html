@@ -1,0 +1,1020 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drone Synth</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .synth-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .control-section {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .section-title {
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            color: #4ecdc4;
+            border-bottom: 2px solid #4ecdc4;
+            padding-bottom: 5px;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+
+        label {
+            min-width: 80px;
+            font-size: 0.9em;
+            color: #cccccc;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        select {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: white;
+            padding: 8px 12px;
+            font-size: 0.9em;
+        }
+
+        .value-display {
+            min-width: 60px;
+            text-align: right;
+            font-size: 0.85em;
+            color: #4ecdc4;
+            font-weight: bold;
+        }
+
+        .main-controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .waveform-visualizer {
+            width: 100%;
+            height: 150px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        @media (max-width: 768px) {
+            .controls-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .main-controls {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+        /**
+        .control-section.collapsed > .control-row {
+            display: none;
+        }
+        .control-section.collapsed > .control-group {
+            display: none;
+        }
+        */
+    </style>
+</head>
+<body>
+    <div class="synth-container">
+        <h1>🎵 Drone Synth</h1>
+        
+        <div class="main-controls">
+            <button id="playBtn">▶️ Play</button>
+            <button id="stopBtn" disabled>⏹️ Stop</button>
+        </div>
+
+        <div class="controls-grid">
+            <!-- Oscillators -->
+            <div class="control-section">
+                <div class="section-title">Oscillators</div>
+                <div class="control-group">
+                    <div class="control-row">
+                        <label>Osc 1 Type:</label>
+                        <select id="osc1Type">
+                            <option value="sine">Sine</option>
+                            <option value="square">Square</option>
+                            <option value="sawtooth" selected>Sawtooth</option>
+                            <option value="triangle">Triangle</option>
+                        </select>
+                    </div>
+                    <div class="control-row">
+                        <label>Freq:</label>
+                        <input type="range" id="osc1Freq" min="20" max="2000" value="110" step="1">
+                        <span class="value-display" id="osc1FreqValue">110 Hz</span>
+                    </div>
+                    <div class="control-row">
+                        <label>Level:</label>
+                        <input type="range" id="osc1Level" min="0" max="1" value="0.3" step="0.01">
+                        <span class="value-display" id="osc1LevelValue">0.30</span>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <div class="control-row">
+                        <label>Osc 2 Type:</label>
+                        <select id="osc2Type">
+                            <option value="sine">Sine</option>
+                            <option value="square" selected>Square</option>
+                            <option value="sawtooth">Sawtooth</option>
+                            <option value="triangle">Triangle</option>
+                        </select>
+                    </div>
+                    <div class="control-row">
+                        <label>Freq:</label>
+                        <input type="range" id="osc2Freq" min="20" max="2000" value="220" step="1">
+                        <span class="value-display" id="osc2FreqValue">220 Hz</span>
+                    </div>
+                    <div class="control-row">
+                        <label>Level:</label>
+                        <input type="range" id="osc2Level" min="0" max="1" value="0.2" step="0.01">
+                        <span class="value-display" id="osc2LevelValue">0.20</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter -->
+            <div class="control-section">
+                <div class="section-title">Filter</div>
+                <div class="control-row">
+                    <label>Type:</label>
+                    <select id="filterType">
+                        <option value="lowpass" selected>Low Pass</option>
+                        <option value="highpass">High Pass</option>
+                        <option value="bandpass">Band Pass</option>
+                        <option value="notch">Notch</option>
+                    </select>
+                </div>
+                <div class="control-row">
+                    <label>Cutoff:</label>
+                    <input type="range" id="filterCutoff" min="20" max="20000" value="1000" step="1">
+                    <span class="value-display" id="filterCutoffValue">1000 Hz</span>
+                </div>
+                <div class="control-row">
+                    <label>Resonance:</label>
+                    <input type="range" id="filterResonance" min="0.1" max="30" value="1" step="0.1">
+                    <span class="value-display" id="filterResonanceValue">1.0</span>
+                </div>
+            </div>
+
+            <!-- LFO -->
+            <div class="control-section">
+                <div class="section-title">LFO</div>
+                <div class="control-row">
+                    <label>Target:</label>
+                    <select id="lfoTarget">
+                        <option value="none">None</option>
+                        <option value="filter" selected>Filter Cutoff</option>
+                        <option value="osc1">Osc 1 Freq</option>
+                        <option value="osc2">Osc 2 Freq</option>
+                        <option value="amplitude">Amplitude</option>
+                    </select>
+                </div>
+                <div class="control-row">
+                    <label>Rate:</label>
+                    <input type="range" id="lfoRate" min="0.1" max="20" value="0.5" step="0.1">
+                    <span class="value-display" id="lfoRateValue">0.5 Hz</span>
+                </div>
+                <div class="control-row">
+                    <label>Depth:</label>
+                    <input type="range" id="lfoDepth" min="0" max="1" value="0.3" step="0.01">
+                    <span class="value-display" id="lfoDepthValue">0.30</span>
+                </div>
+                <div class="control-row">
+                    <label>Waveform:</label>
+                    <select id="lfoWaveform">
+                        <option value="sine" selected>Sine</option>
+                        <option value="square">Square</option>
+                        <option value="sawtooth">Sawtooth</option>
+                        <option value="triangle">Triangle</option>
+                    </select>
+                </div>
+            </div>
+
+
+
+            <!-- LFO 2 -->
+            <div class="control-section">
+                <div class="section-title">LFO 2</div>
+                <div class="control-row">
+                    <label>Target:</label>
+                    <select id="lfo2Target">
+                        <option value="none">None</option>
+                        <option value="filter" selected>Filter Cutoff</option>
+                        <option value="osc1">Osc 1 Freq</option>
+                        <option value="osc2">Osc 2 Freq</option>
+                        <option value="amplitude">Amplitude</option>
+                    </select>
+                </div>
+                <div class="control-row">
+                    <label>Rate:</label>
+                    <input type="range" id="lfo2Rate" min="0.1" max="20" value="0.5" step="0.1">
+                    <span class="value-display" id="lfo2RateValue">0.5 Hz</span>
+                </div>
+                <div class="control-row">
+                    <label>Depth:</label>
+                    <input type="range" id="lfo2Depth" min="0" max="1" value="0.3" step="0.01">
+                    <span class="value-display" id="lfo2DepthValue">0.30</span>
+                </div>
+                <div class="control-row">
+                    <label>Waveform:</label>
+                    <select id="lfo2Waveform">
+                        <option value="sine" selected>Sine</option>
+                        <option value="square">Square</option>
+                        <option value="sawtooth">Sawtooth</option>
+                        <option value="triangle">Triangle</option>
+                    </select>
+                </div>
+            </div>
+
+
+            <!-- Delay Effect -->
+            <div class="control-section">
+                <div class="section-title">Delay</div>
+                <div class="control-row">
+                    <label>Time:</label>
+                    <input type="range" id="delayTime" min="0" max="1" value="0.3" step="0.01">
+                    <span class="value-display" id="delayTimeValue">0.30 s</span>
+                </div>
+                <div class="control-row">
+                    <label>Feedback:</label>
+                    <input type="range" id="delayFeedback" min="0" max="0.95" value="0.4" step="0.01">
+                    <span class="value-display" id="delayFeedbackValue">0.40</span>
+                </div>
+                <div class="control-row">
+                    <label>Mix:</label>
+                    <input type="range" id="delayMix" min="0" max="1" value="0.2" step="0.01">
+                    <span class="value-display" id="delayMixValue">0.20</span>
+                </div>
+            </div>
+
+            <!-- Reverb Effect -->
+            <div class="control-section">
+                <div class="section-title">Reverb</div>
+                <div class="control-row">
+                    <label>Room Size:</label>
+                    <input type="range" id="reverbRoom" min="0" max="1" value="0.5" step="0.01">
+                    <span class="value-display" id="reverbRoomValue">0.50</span>
+                </div>
+                <div class="control-row">
+                    <label>Decay:</label>
+                    <input type="range" id="reverbDecay" min="0" max="10" value="2" step="0.1">
+                    <span class="value-display" id="reverbDecayValue">2.0 s</span>
+                </div>
+                <div class="control-row">
+                    <label>Mix:</label>
+                    <input type="range" id="reverbMix" min="0" max="1" value="0.1" step="0.01">
+                    <span class="value-display" id="reverbMixValue">0.10</span>
+                </div>
+            </div>
+
+            <!-- Master -->
+            <div class="control-section">
+                <div class="section-title">Master</div> 
+                <div class="control-row">
+                    <label>Volume:</label>
+                    <input type="range" id="masterVolume" min="0" max="1" value="0.7" step="0.01">
+                    <span class="value-display" id="masterVolumeValue">0.70</span>
+                </div>
+                <div class="control-row">
+                    <label>Distortion:</label>
+                    <input type="range" id="distortion" min="0" max="50" value="0" step="1">
+                    <span class="value-display" id="distortionValue">0</span>
+                </div>
+            </div>
+        </div>
+
+        <canvas class="waveform-visualizer" id="visualizer"></canvas>
+    </div>
+
+    <script>
+        class DroneSynth {
+            constructor() {
+                this.audioContext = null;
+                this.isPlaying = false;
+                this.nodes = {};
+                this.lfo = null;
+                this.lfoGain = null;
+                this.lfo2 = null;
+                this.lfo2Gain = null;
+                this.analyser = null;
+                this.visualizer = null;
+                
+                this.initializeAudio();
+                this.setupEventListeners();
+                this.initializeVisualizer();
+            }
+
+            async initializeAudio() {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Create oscillators
+                this.nodes.osc1 = this.audioContext.createOscillator();
+                this.nodes.osc2 = this.audioContext.createOscillator();
+                
+                // Create gains for oscillators
+                this.nodes.osc1Gain = this.audioContext.createGain();
+                this.nodes.osc2Gain = this.audioContext.createGain();
+                
+                // Create mixer
+                this.nodes.mixer = this.audioContext.createGain();
+                
+                // Create filter
+                this.nodes.filter = this.audioContext.createBiquadFilter();
+                
+                // Create LFO
+                this.lfo = this.audioContext.createOscillator();
+                this.lfoGain = this.audioContext.createGain();
+
+                // Create LFO 2
+                this.lfo2 = this.audioContext.createOscillator();
+                this.lfo2Gain = this.audioContext.createGain();
+                
+                // Create delay
+                this.nodes.delay = this.audioContext.createDelay(1.0);
+                this.nodes.delayFeedback = this.audioContext.createGain();
+                this.nodes.delayMix = this.audioContext.createGain();
+                this.nodes.delayDry = this.audioContext.createGain();
+                
+                // Create reverb (using convolver)
+                this.nodes.reverb = this.audioContext.createConvolver();
+                this.nodes.reverbMix = this.audioContext.createGain();
+                this.nodes.reverbDry = this.audioContext.createGain();
+                
+                // Create distortion
+                this.nodes.distortion = this.audioContext.createWaveShaper();
+                
+                // Create master gain
+                this.nodes.masterGain = this.audioContext.createGain();
+                
+                // Create analyser for visualization
+                this.analyser = this.audioContext.createAnalyser();
+                this.analyser.fftSize = 2048;
+                
+                // Set initial values
+                this.setInitialValues();
+                
+                // Create reverb impulse response
+                await this.createReverbImpulse();
+                
+                // Connect nodes
+                this.connectNodes();
+            }
+
+            setInitialValues() {
+                this.nodes.osc1.type = 'sawtooth';
+                this.nodes.osc1.frequency.setValueAtTime(110, this.audioContext.currentTime);
+                this.nodes.osc1Gain.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+                
+                this.nodes.osc2.type = 'square';
+                this.nodes.osc2.frequency.setValueAtTime(220, this.audioContext.currentTime);
+                this.nodes.osc2Gain.gain.setValueAtTime(0.2, this.audioContext.currentTime);
+                
+                this.nodes.filter.type = 'lowpass';
+                this.nodes.filter.frequency.setValueAtTime(1000, this.audioContext.currentTime);
+                this.nodes.filter.Q.setValueAtTime(1, this.audioContext.currentTime);
+                
+                this.lfo.type = 'sine';
+                this.lfo.frequency.setValueAtTime(0.5, this.audioContext.currentTime);
+                this.lfoGain.gain.setValueAtTime(300, this.audioContext.currentTime);
+
+                this.lfo2.type = 'sine';
+                this.lfo2.frequency.setValueAtTime(0.5, this.audioContext.currentTime);
+                this.lfo2Gain.gain.setValueAtTime(300, this.audioContext.currentTime);
+                
+                this.nodes.delay.delayTime.setValueAtTime(0.3, this.audioContext.currentTime);
+                this.nodes.delayFeedback.gain.setValueAtTime(0.4, this.audioContext.currentTime);
+                this.nodes.delayMix.gain.setValueAtTime(0.2, this.audioContext.currentTime);
+                this.nodes.delayDry.gain.setValueAtTime(0.8, this.audioContext.currentTime);
+                
+                this.nodes.reverbMix.gain.setValueAtTime(0.1, this.audioContext.currentTime);
+                this.nodes.reverbDry.gain.setValueAtTime(0.9, this.audioContext.currentTime);
+                
+                this.nodes.masterGain.gain.setValueAtTime(0.7, this.audioContext.currentTime);
+                
+                this.updateDistortion(0);
+            }
+
+            async createReverbImpulse() {
+                const length = this.audioContext.sampleRate * 2; // 2 seconds
+                const impulse = this.audioContext.createBuffer(2, length, this.audioContext.sampleRate);
+                
+                for (let channel = 0; channel < 2; channel++) {
+                    const channelData = impulse.getChannelData(channel);
+                    for (let i = 0; i < length; i++) {
+                        channelData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2);
+                    }
+                }
+                
+                this.nodes.reverb.buffer = impulse;
+            }
+
+            connectNodes() {
+                // Connect oscillators to their gains
+                this.nodes.osc1.connect(this.nodes.osc1Gain);
+                this.nodes.osc2.connect(this.nodes.osc2Gain);
+                
+                // Connect oscillator gains to mixer
+                this.nodes.osc1Gain.connect(this.nodes.mixer);
+                this.nodes.osc2Gain.connect(this.nodes.mixer);
+                
+                // Connect mixer to filter
+                this.nodes.mixer.connect(this.nodes.filter);
+                
+                // Connect filter to delay (wet/dry)
+                this.nodes.filter.connect(this.nodes.delayDry);
+                this.nodes.filter.connect(this.nodes.delay);
+                
+                // Delay feedback loop
+                this.nodes.delay.connect(this.nodes.delayFeedback);
+                this.nodes.delayFeedback.connect(this.nodes.delay);
+                
+                // Delay output
+                this.nodes.delay.connect(this.nodes.delayMix);
+                
+                // Mix delay
+                this.nodes.delayDry.connect(this.nodes.reverbDry);
+                this.nodes.delayMix.connect(this.nodes.reverbDry);
+                
+                // Connect to reverb
+                this.nodes.delayDry.connect(this.nodes.reverb);
+                this.nodes.delayMix.connect(this.nodes.reverb);
+                this.nodes.reverb.connect(this.nodes.reverbMix);
+                
+                // Mix reverb
+                this.nodes.reverbDry.connect(this.nodes.distortion);
+                this.nodes.reverbMix.connect(this.nodes.distortion);
+                
+                // Connect to master and output
+                this.nodes.distortion.connect(this.nodes.masterGain);
+                this.nodes.masterGain.connect(this.analyser);
+                this.nodes.masterGain.connect(this.audioContext.destination);
+                
+                // Connect LFO to filter cutoff by default
+                this.lfo.connect(this.lfoGain);
+                this.lfoGain.connect(this.nodes.filter.frequency);
+
+                // Connect LFO2 to filter cutoff by default
+                this.lfo2.connect(this.lfo2Gain);
+                this.lfo2Gain.connect(this.nodes.filter.frequency);
+            }
+
+            updateDistortion(amount) {
+                const samples = 44100;
+                const curve = new Float32Array(samples);
+                const deg = Math.PI / 180;
+                
+                for (let i = 0; i < samples; i++) {
+                    const x = (i * 2) / samples - 1;
+                    if (amount === 0) {
+                        curve[i] = x;
+                    } else {
+                        curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
+                    }
+                }
+                
+                this.nodes.distortion.curve = curve;
+                this.nodes.distortion.oversample = '4x';
+            }
+
+            updateLFOTarget(target) {
+                // Disconnect current LFO connection
+                this.lfoGain.disconnect();
+                
+                switch (target) {
+                    case 'filter':
+                        this.lfoGain.connect(this.nodes.filter.frequency);
+                        break;
+                    case 'osc1':
+                        this.lfoGain.connect(this.nodes.osc1.frequency);
+                        break;
+                    case 'osc2':
+                        this.lfoGain.connect(this.nodes.osc2.frequency);
+                        break;
+                    case 'amplitude':
+                        this.lfoGain.connect(this.nodes.mixer.gain);
+                        break;
+                    case 'none':
+                    default:
+                        // Don't connect to anything
+                        break;
+                }
+            }
+
+            updateLFO2Target(target) {
+                // Disconnect current LFO connection
+                this.lfo2Gain.disconnect();
+                
+                switch (target) {
+                    case 'filter':
+                        this.lfo2Gain.connect(this.nodes.filter.frequency);
+                        break;
+                    case 'osc1':
+                        this.lfo2Gain.connect(this.nodes.osc1.frequency);
+                        break;
+                    case 'osc2':
+                        this.lfo2Gain.connect(this.nodes.osc2.frequency);
+                        break;
+                    case 'amplitude':
+                        this.lfo2Gain.connect(this.nodes.mixer.gain);
+                        break;
+                    case 'none':
+                    default:
+                        // Don't connect to anything
+                        break;
+                }
+            }
+
+            start() {
+                if (this.isPlaying) return;
+                
+                if (this.audioContext.state === 'suspended') {
+                    this.audioContext.resume();
+                }
+                
+                // Create new oscillators (they can only be started once)
+                this.nodes.osc1 = this.audioContext.createOscillator();
+                this.nodes.osc2 = this.audioContext.createOscillator();
+                this.lfo = this.audioContext.createOscillator();
+                this.lfo2 = this.audioContext.createOscillator();
+                
+                // Restore oscillator settings
+                this.updateOscillator(1);
+                this.updateOscillator(2);
+                this.updateLFO();
+                this.updateLFO2();
+                
+                // Reconnect oscillators
+                this.nodes.osc1.connect(this.nodes.osc1Gain);
+                this.nodes.osc2.connect(this.nodes.osc2Gain);
+                this.lfo.connect(this.lfoGain);
+                this.lfo2.connect(this.lfo2Gain);
+                
+                // Start oscillators
+                this.nodes.osc1.start();
+                this.nodes.osc2.start();
+                this.lfo.start();
+                this.lfo2.start();
+                
+                this.isPlaying = true;
+                this.startVisualization();
+            }
+
+            stop() {
+                if (!this.isPlaying) return;
+                
+                this.nodes.osc1.stop();
+                this.nodes.osc2.stop();
+                this.lfo.stop();
+                this.lfo2.stop();
+                
+                this.isPlaying = false;
+                this.stopVisualization();
+            }
+
+            updateOscillator(oscNum) {
+                const typeId = `osc${oscNum}Type`;
+                const freqId = `osc${oscNum}Freq`;
+                const levelId = `osc${oscNum}Level`;
+                
+                const type = document.getElementById(typeId).value;
+                const freq = parseFloat(document.getElementById(freqId).value);
+                const level = parseFloat(document.getElementById(levelId).value);
+                
+                if (this.nodes[`osc${oscNum}`]) {
+                    this.nodes[`osc${oscNum}`].type = type;
+                    this.nodes[`osc${oscNum}`].frequency.setValueAtTime(freq, this.audioContext.currentTime);
+                    this.nodes[`osc${oscNum}Gain`].gain.setValueAtTime(level, this.audioContext.currentTime);
+                }
+            }
+
+            updateLFO() {
+                const rate = parseFloat(document.getElementById('lfoRate').value);
+                const depth = parseFloat(document.getElementById('lfoDepth').value);
+                const waveform = document.getElementById('lfoWaveform').value;
+                const target = document.getElementById('lfoTarget').value;
+                
+                if (this.lfo) {
+                    this.lfo.type = waveform;
+                    this.lfo.frequency.setValueAtTime(rate, this.audioContext.currentTime);
+                    
+                    // Adjust LFO depth based on target
+                    let depthValue = depth;
+                    switch (target) {
+                        case 'filter':
+                            depthValue *= 500; // Filter cutoff range
+                            break;
+                        case 'osc1':
+                        case 'osc2':
+                            depthValue *= 50; // Frequency modulation range
+                            break;
+                        case 'amplitude':
+                            depthValue *= 0.5; // Amplitude modulation range
+                            break;
+                    }
+                    
+                    this.lfoGain.gain.setValueAtTime(depthValue, this.audioContext.currentTime);
+                }
+                
+                this.updateLFOTarget(target);
+            }
+
+
+            updateLFO2() {
+                const rate = parseFloat(document.getElementById('lfo2Rate').value);
+                const depth = parseFloat(document.getElementById('lfo2Depth').value);
+                const waveform = document.getElementById('lfo2Waveform').value;
+                const target = document.getElementById('lfo2Target').value;
+                
+                if (this.lfo2) {
+                    this.lfo2.type = waveform;
+                    this.lfo2.frequency.setValueAtTime(rate, this.audioContext.currentTime);
+                    
+                    // Adjust LFO depth based on target
+                    let depthValue = depth;
+                    switch (target) {
+                        case 'filter':
+                            depthValue *= 500; // Filter cutoff range
+                            break;
+                        case 'osc1':
+                        case 'osc2':
+                            depthValue *= 50; // Frequency modulation range
+                            break;
+                        case 'amplitude':
+                            depthValue *= 0.5; // Amplitude modulation range
+                            break;
+                    }
+                    
+                    this.lfo2Gain.gain.setValueAtTime(depthValue, this.audioContext.currentTime);
+                }
+                
+                this.updateLFO2Target(target);
+            }
+
+            initializeVisualizer() {
+                this.canvas = document.getElementById('visualizer');
+                this.canvasCtx = this.canvas.getContext('2d');
+                this.canvas.width = this.canvas.offsetWidth;
+                this.canvas.height = this.canvas.offsetHeight;
+                
+                window.addEventListener('resize', () => {
+                    this.canvas.width = this.canvas.offsetWidth;
+                    this.canvas.height = this.canvas.offsetHeight;
+                });
+            }
+
+            startVisualization() {
+                const bufferLength = this.analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                
+                const draw = () => {
+                    if (!this.isPlaying) return;
+                    
+                    requestAnimationFrame(draw);
+                    
+                    this.analyser.getByteFrequencyData(dataArray);
+                    
+                    this.canvasCtx.fillStyle = 'rgba(10, 10, 10, 0.1)';
+                    this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                    
+                    const barWidth = (this.canvas.width / bufferLength) * 2.5;
+                    let barHeight;
+                    let x = 0;
+                    
+                    for (let i = 0; i < bufferLength; i++) {
+                        barHeight = (dataArray[i] / 255) * this.canvas.height;
+                        
+                        const hue = (i / bufferLength) * 360;
+                        this.canvasCtx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+                        this.canvasCtx.fillRect(x, this.canvas.height - barHeight, barWidth, barHeight);
+                        
+                        x += barWidth + 1;
+                    }
+                };
+                
+                draw();
+            }
+
+            stopVisualization() {
+                this.canvasCtx.fillStyle = 'rgba(10, 10, 10, 1)';
+                this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            }
+
+            setupEventListeners() {
+                // Play/Stop buttons
+                document.getElementById('playBtn').addEventListener('click', () => {
+                    this.start();
+                    document.getElementById('playBtn').disabled = true;
+                    document.getElementById('stopBtn').disabled = false;
+                });
+                
+                document.getElementById('stopBtn').addEventListener('click', () => {
+                    this.stop();
+                    document.getElementById('playBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                });
+                
+                // Oscillator controls
+                ['osc1Type', 'osc2Type'].forEach(id => {
+                    document.getElementById(id).addEventListener('change', () => {
+                        const oscNum = id.includes('osc1') ? 1 : 2;
+                        this.updateOscillator(oscNum);
+                    });
+                });
+                
+                ['osc1Freq', 'osc2Freq', 'osc1Level', 'osc2Level'].forEach(id => {
+                    const input = document.getElementById(id);
+                    const valueDisplay = document.getElementById(id + 'Value');
+                    
+                    input.addEventListener('input', () => {
+                        const value = parseFloat(input.value);
+                        const oscNum = id.includes('osc1') ? 1 : 2;
+                        
+                        if (id.includes('Freq')) {
+                            valueDisplay.textContent = `${value} Hz`;
+                        } else if (id.includes('Level')) {
+                            valueDisplay.textContent = value.toFixed(2);
+                        }
+                        
+                        this.updateOscillator(oscNum);
+                    });
+                });
+                
+                // Filter controls
+                document.getElementById('filterType').addEventListener('change', (e) => {
+                    this.nodes.filter.type = e.target.value;
+                });
+                
+                document.getElementById('filterCutoff').addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    this.nodes.filter.frequency.setValueAtTime(value, this.audioContext.currentTime);
+                    document.getElementById('filterCutoffValue').textContent = `${value} Hz`;
+                });
+                
+                document.getElementById('filterResonance').addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    this.nodes.filter.Q.setValueAtTime(value, this.audioContext.currentTime);
+                    document.getElementById('filterResonanceValue').textContent = value.toFixed(1);
+                });
+                
+                // LFO controls
+                ['lfoTarget', 'lfoWaveform'].forEach(id => {
+                    document.getElementById(id).addEventListener('change', () => {
+                        this.updateLFO();
+                    });
+                });
+                
+                ['lfoRate', 'lfoDepth'].forEach(id => {
+                    const input = document.getElementById(id);
+                    const valueDisplay = document.getElementById(id + 'Value');
+                    
+                    input.addEventListener('input', () => {
+                        const value = parseFloat(input.value);
+                        
+                        if (id === 'lfoRate') {
+                            valueDisplay.textContent = `${value} Hz`;
+                        } else if (id === 'lfoDepth') {
+                            valueDisplay.textContent = value.toFixed(2);
+                        }
+                        
+                        this.updateLFO();
+                    });
+                });
+
+                // LFO 2 controls
+                ['lfo2Target', 'lfo2Waveform'].forEach(id => {
+                    document.getElementById(id).addEventListener('change', () => {
+                        this.updateLFO2();
+                    });
+                });
+                
+                ['lfo2Rate', 'lfo2Depth'].forEach(id => {
+                    const input = document.getElementById(id);
+                    const valueDisplay = document.getElementById(id + 'Value');
+                    
+                    input.addEventListener('input', () => {
+                        const value = parseFloat(input.value);
+                        
+                        if (id === 'lfo2Rate') {
+                            valueDisplay.textContent = `${value} Hz`;
+                        } else if (id === 'lfo2Depth') {
+                            valueDisplay.textContent = value.toFixed(2);
+                        }
+                        
+                        this.updateLFO2();
+                    });
+                });
+                
+                // Delay controls
+                document.getElementById('delayTime').addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    this.nodes.delay.delayTime.setValueAtTime(value, this.audioContext.currentTime);
+                    document.getElementById('delayTimeValue').textContent = `${value.toFixed(2)} s`;
+                });
+                
+                document.getElementById('delayFeedback').addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    this.nodes.delayFeedback.gain.setValueAtTime(value, this.audioContext.currentTime);
+                    document.getElementById('delayFeedbackValue').textContent = value.toFixed(2);
+                });
+                
+                document.getElementById('delayMix').addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    this.nodes.delayMix.gain.setValueAtTime(value, this.audioContext.currentTime);
+                    this.nodes.delayDry.gain.setValueAtTime(1 - value, this.audioContext.currentTime);
+                    document.getElementById('delayMixValue').textContent = value.toFixed(2);
+                });
+                
+                // Reverb controls
+                document.getElementById('reverbRoom').addEventListener('input', async (e) => {
+                    const value = parseFloat(e.target.value);
+                    await this.createReverbImpulse(value);
+                    document.getElementById('reverbRoomValue').textContent = value.toFixed(2);
+                });
+                
+                document.getElementById('reverbDecay').addEventListener('input', async (e) => {
+                    const value = parseFloat(e.target.value);
+                    await this.createReverbImpulse(null, value);
+                    document.getElementById('reverbDecayValue').textContent = `${value.toFixed(1)} s`;
+                });
+                
+                document.getElementById('reverbMix').addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    this.nodes.reverbMix.gain.setValueAtTime(value, this.audioContext.currentTime);
+                    this.nodes.reverbDry.gain.setValueAtTime(1 - value, this.audioContext.currentTime);
+                    document.getElementById('reverbMixValue').textContent = value.toFixed(2);
+                });
+                
+                // Master controls
+                document.getElementById('masterVolume').addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    this.nodes.masterGain.gain.setValueAtTime(value, this.audioContext.currentTime);
+                    document.getElementById('masterVolumeValue').textContent = value.toFixed(2);
+                });
+                
+                document.getElementById('distortion').addEventListener('input', (e) => {
+                    const value = parseFloat(e.target.value);
+                    this.updateDistortion(value);
+                    document.getElementById('distortionValue').textContent = value.toString();
+                });
+            }
+        }
+        
+        // Enhanced reverb impulse creation with room size and decay parameters
+        DroneSynth.prototype.createReverbImpulse = function(roomSize = null, decayTime = null) {
+            const room = roomSize !== null ? roomSize : parseFloat(document.getElementById('reverbRoom').value);
+            const decay = decayTime !== null ? decayTime : parseFloat(document.getElementById('reverbDecay').value);
+            
+            const length = this.audioContext.sampleRate * decay;
+            const impulse = this.audioContext.createBuffer(2, length, this.audioContext.sampleRate);
+            
+            for (let channel = 0; channel < 2; channel++) {
+                const channelData = impulse.getChannelData(channel);
+                for (let i = 0; i < length; i++) {
+                    const t = i / length;
+                    const envelope = Math.pow(1 - t, 1 + room * 2);
+                    const noise = (Math.random() * 2 - 1) * envelope;
+                    
+                    // Add some early reflections for room character
+                    let earlyReflections = 0;
+                    const reflectionTimes = [0.02, 0.04, 0.07, 0.1, 0.15];
+                    reflectionTimes.forEach(reflectionTime => {
+                        const reflectionSample = Math.floor(reflectionTime * this.audioContext.sampleRate);
+                        if (i === reflectionSample) {
+                            earlyReflections += 0.3 * room * (Math.random() * 2 - 1);
+                        }
+                    });
+                    
+                    channelData[i] = noise + earlyReflections;
+                }
+            }
+            
+            this.nodes.reverb.buffer = impulse;
+            return Promise.resolve();
+        };
+
+        // Initialize the synth when the page loads
+        let synth;
+        document.addEventListener('DOMContentLoaded', () => {
+            synth = new DroneSynth();
+        });
+
+        // [...document.querySelectorAll(".section-title")].forEach(title => {
+        //     title.addEventListener("click", () => {
+        //         const section = title.parentElement;
+        //         section.classList.toggle("collapsed");
+        //     });
+        // });
+
+    </script>
+</body>
+</html>
