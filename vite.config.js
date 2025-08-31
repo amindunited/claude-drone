@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'src/index.html'),
         original: resolve(__dirname, 'src/original.html'),
+        twoLfos: resolve(__dirname, 'src/two-lfos.html'),
         // about: resolve(__dirname, 'src/about.html'),
         // contact: resolve(__dirname, 'src/contact.html'),
         // Add more pages here as needed
