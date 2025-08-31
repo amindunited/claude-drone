@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Drone Synth</title>
+    <title>Claude Drone Synth</title>
     <style>
         * {
             margin: 0;
@@ -16,78 +16,115 @@
             background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
             color: #ffffff;
             min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             padding: 20px;
         }
 
-        .synth-container {
-            max-width: 1200px;
+        .container {
+            max-width: 800px;
             margin: 0 auto;
             background: rgba(255, 255, 255, 0.05);
             backdrop-filter: blur(10px);
             border-radius: 20px;
-            padding: 30px;
+            padding: 40px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            text-align: center;
         }
 
         h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
+            font-size: 3em;
+            margin-bottom: 20px;
             background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
 
-        .controls-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 25px;
-            margin-bottom: 30px;
+        .description {
+            font-size: 1.2em;
+            margin-bottom: 40px;
+            color: #cccccc;
+            line-height: 1.6;
         }
 
-        .control-section {
+        .pages-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .page-card {
             background: rgba(255, 255, 255, 0.08);
             border-radius: 15px;
-            padding: 20px;
+            padding: 25px;
             border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: inherit;
         }
 
-        .section-title {
-            font-size: 1.3em;
-            margin-bottom: 15px;
-            color: #4ecdc4;
-            border-bottom: 2px solid #4ecdc4;
-            padding-bottom: 5px;
+        .page-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            border-color: #4ecdc4;
         }
 
-        .control-row {
-            display: flex;
-            align-items: center;
-            gap: 15px;
+        .page-title {
+            font-size: 1.5em;
             margin-bottom: 10px;
+            color: #4ecdc4;
         }
 
-        label, .label {
-            min-width: 80px;
-            font-size: 0.9em;
+        .page-description {
             color: #cccccc;
+            font-size: 0.9em;
         }
 
+        .badge {
+            display: inline-block;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: bold;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
-    <div class="synth-container">
-        <h1>🎵 Synths</h1>
-        <div class="control-section">
-            <ul>
-                <li class="control-row">
-                    <a href="./original.html" class="label">Original Drone Synth</a>
-                </li>
-                <li class="control-row">
-                    <a href="./two-lfos.html" class="label">Drone Synth with 2 LFOs</a>
-                </li>
-            </ul>
+    <div class="container">
+        <h1>🎵 Claude Drone Synth</h1>
+        <div class="description">
+            A collection of drone synthesizer implementations showcasing different approaches to audio synthesis.
+        </div>
+
+        <div class="pages-grid">
+            <a href="./ts-synth.html" class="page-card">
+                <div class="page-title">TypeScript Synth</div>
+                <div class="page-description">
+                    Modular TypeScript implementation with composable functions and clean architecture.
+                </div>
+                <div class="badge">Recommended</div>
+            </a>
+
+            <a href="./two-lfos.html" class="page-card">
+                <div class="page-title">Two LFOs</div>
+                <div class="page-description">
+                    Original implementation with dual LFO support for complex modulation effects.
+                </div>
+                <div class="badge">Legacy</div>
+            </a>
+
+            <a href="./original.html" class="page-card">
+                <div class="page-title">Original</div>
+                <div class="page-description">
+                    Basic drone synthesizer with essential oscillators, filter, and effects.
+                </div>
+                <div class="badge">Simple</div>
+            </a>
         </div>
     </div>
 </body>
