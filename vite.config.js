@@ -1,9 +1,11 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
+const isProd = true; // import.meta.env?.PROD;
+
 export default defineConfig({
   root: './src',
-  base: '/',
+  base: isProd ? '/claude-drone/' : '/',
   build: {
     outDir: '../dist',
     emptyOutDir: true,
