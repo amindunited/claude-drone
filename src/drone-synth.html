@@ -651,16 +651,9 @@ class NoteVoice{
     src.connect(filter).connect(amp).connect(voice.bus);
     src.start();
 
-    /* LFO */
-    const lfo=ctx.createOscillator(); lfo.type='sine';
-    const lfoDepth=ctx.createGain(); lfoDepth.gain.value=0;
-    lfo.connect(lfoDepth);
-    lfo.start();
-    this.lfo=lfo; this.lfoDepth=lfoDepth; this.lfoTarget=null;
-    this._applyLfoSettings(p);
-    this._connectLfoTarget(p.lfoTarget);
-    Engine.syncedLfos.add(this._syncEntry={osc:lfo, beats:1, mode:p.lfoRateMode});
-    this._setLfoRate(p);
+    /* Dual LFOs */
+    this.lfo1=this._createLfo('lfo', p);
+    this.lfo2=this._createLfo('lfo2', p);
 
     /* schedule ADSR */
     const vel=clamp(velocity/127,0.05,1);
@@ -676,29 +669,46 @@ class NoteVoice{
     fenv.offset.linearRampToValueAtTime(1, now+Math.max(0.002,p.attack));
     fenv.offset.linearRampToValueAtTime(p.sustain, now+p.attack+Math.max(0.002,p.decay));
   }
-  _connectLfoTarget(target){
-    if(this.lfoTarget){
-      try{ this.lfoDepth.disconnect(); }catch(e){}
+  _createLfo(prefix, p){
+    const lfo=Engine.ctx.createOscillator(); lfo.type='sine';
+    const depth=Engine.ctx.createGain(); depth.gain.value=0;
+    lfo.connect(depth);
+    lfo.start();
+    const state={lfo, depth, target:null, syncEntry:{osc:lfo, beats:1, mode:p[`${prefix}RateMode`]}};
+    this._applyLfoSettings(state, prefix, p);
+    this._connectLfoTarget(state, p[`${prefix}Target`]);
+    Engine.syncedLfos.add(state.syncEntry);
+    this._setLfoRate(state, prefix, p);
+    return state;
+  }
+  _connectLfoTarget(state, target){
+    if(state.target){
+      try{ state.depth.disconnect(); }catch(e){}
     }
-    this.lfoTarget=target;
-    if(target==='pitch'){ this.lfoDepth.connect(this.src.detune); }
-    else if(target==='filter'){ this.lfoDepth.connect(this.filter.frequency); }
-    else if(target==='amplitude'){ this.lfoDepth.connect(this.amp.gain); }
+    state.target=target;
+    if(target==='pitch'){ state.depth.connect(this.src.detune); }
+    else if(target==='filter'){ state.depth.connect(this.filter.frequency); }
+    else if(target==='amplitude'){ state.depth.connect(this.amp.gain); }
     /* 'none' -> stays disconnected */
   }
-  _applyLfoSettings(p){
+  _applyLfoSettings(state, prefix, p){
+    const target=p[`${prefix}Target`];
+    const depth=p[`${prefix}Depth`];
     let depthVal=0;
-    if(p.lfoTarget==='pitch') depthVal=p.lfoDepth*1200; // cents (0-1 -> 0-1200)
-    else if(p.lfoTarget==='filter') depthVal=p.lfoDepth*4000; // Hz
-    else if(p.lfoTarget==='amplitude') depthVal=p.lfoDepth*0.5; // gain
-    this.lfoDepth.gain.setTargetAtTime(depthVal, Engine.ctx.currentTime, 0.03);
+    if(target==='pitch') depthVal=depth*1200; // cents (0-1 -> 0-1200)
+    else if(target==='filter') depthVal=depth*4000; // Hz
+    else if(target==='amplitude') depthVal=depth*0.5; // gain
+    state.depth.gain.setTargetAtTime(depthVal, Engine.ctx.currentTime, 0.03);
   }
-  _setLfoRate(p){
+  _setLfoRate(state, prefix, p){
+    const mode=p[`${prefix}RateMode`];
+    const div=p[`${prefix}RateDivision`];
+    const hzVal=p[`${prefix}RateHz`];
     let hz;
-    if(p.lfoRateMode==='sync'){ hz=Engine.divisionHz(p.lfoRateDivision); }
-    else { hz=p.lfoRateHz; }
-    this.lfo.frequency.setTargetAtTime(hz, Engine.ctx.currentTime, 0.03);
-    if(this._syncEntry){ this._syncEntry.beats=p.lfoRateDivision; this._syncEntry.mode=p.lfoRateMode; }
+    if(mode==='sync'){ hz=Engine.divisionHz(div); }
+    else { hz=hzVal; }
+    state.lfo.frequency.setTargetAtTime(hz, Engine.ctx.currentTime, 0.03);
+    if(state.syncEntry){ state.syncEntry.beats=div; state.syncEntry.mode=mode; }
   }
   updateLive(p){
     const ctx=Engine.ctx, now=ctx.currentTime;
@@ -710,9 +720,12 @@ class NoteVoice{
     this.filter.frequency.setTargetAtTime(p.cutoff, now, 0.03);
     this.filter.Q.setTargetAtTime(p.resonance, now, 0.03);
     this.fenvGain.gain.setTargetAtTime(p.envDepth, now, 0.03);
-    if(this.lfoTarget!==p.lfoTarget) this._connectLfoTarget(p.lfoTarget);
-    this._applyLfoSettings(p);
-    this._setLfoRate(p);
+    if(this.lfo1.target!==p.lfoTarget) this._connectLfoTarget(this.lfo1, p.lfoTarget);
+    this._applyLfoSettings(this.lfo1, 'lfo', p);
+    this._setLfoRate(this.lfo1, 'lfo', p);
+    if(this.lfo2.target!==p.lfo2Target) this._connectLfoTarget(this.lfo2, p.lfo2Target);
+    this._applyLfoSettings(this.lfo2, 'lfo2', p);
+    this._setLfoRate(this.lfo2, 'lfo2', p);
   }
   release(){
     if(this.releasing) return;
@@ -727,19 +740,25 @@ class NoteVoice{
     this.fenv.offset.linearRampToValueAtTime(0, now+rel);
     const stopAt=now+rel+0.05;
     try{ this.src.stop(stopAt); }catch(e){}
-    try{ this.lfo.stop(stopAt); }catch(e){}
+    try{ this.lfo1.lfo.stop(stopAt); }catch(e){}
+    try{ this.lfo2.lfo.stop(stopAt); }catch(e){}
     try{ this.fenv.stop(stopAt); }catch(e){}
     setTimeout(()=>this._cleanup(), (rel+0.15)*1000);
   }
   forceStop(){
     try{ this.src.stop(); }catch(e){}
-    try{ this.lfo.stop(); }catch(e){}
+    try{ this.lfo1.lfo.stop(); }catch(e){}
+    try{ this.lfo2.lfo.stop(); }catch(e){}
     try{ this.fenv.stop(); }catch(e){}
     this._cleanup();
   }
   _cleanup(){
-    Engine.syncedLfos.delete(this._syncEntry);
-    [this.src,this.filter,this.amp,this.fenv,this.fenvGain,this.lfo,this.lfoDepth].forEach(n=>{ try{n.disconnect();}catch(e){} });
+    Engine.syncedLfos.delete(this.lfo1.syncEntry);
+    Engine.syncedLfos.delete(this.lfo2.syncEntry);
+    [
+      this.src,this.filter,this.amp,this.fenv,this.fenvGain,
+      this.lfo1.lfo,this.lfo1.depth,this.lfo2.lfo,this.lfo2.depth,
+    ].forEach(n=>{ try{n.disconnect();}catch(e){} });
   }
 }
 
@@ -760,6 +779,7 @@ class Voice{
       attack:0.6, decay:0.4, sustain:0.75, release:1.2,
       filterType:'lowpass', cutoff:2200, resonance:1.0, envDepth:0,
       lfoTarget:'none', lfoRateMode:'hz', lfoRateHz:2, lfoRateDivision:4, lfoDepth:0.3,
+      lfo2Target:'none', lfo2RateMode:'hz', lfo2RateHz:0.5, lfo2RateDivision:4, lfo2Depth:0,
       level:0.7, sends:{distortion:0,chorus:0,delay:0,reverb:0},
     }, preset||{});
 
@@ -854,7 +874,7 @@ class Voice{
 
         <div class="section collapsible expanded" data-section="lfo">
           <button type="button" class="section-label section-toggle" data-act="toggle-lfo" aria-expanded="true">
-            LFO / Modulation <span class="chev">▾</span>
+            LFO 1 / Modulation <span class="chev">▾</span>
           </button>
           <div class="section-content">
             <div class="row-select">
@@ -873,6 +893,30 @@ class Voice{
               <select class="control" data-p="lfoRateDivision"></select>
             </div>
             <div class="knob-grid n2" data-group="lfo-knobs"></div>
+          </div>
+        </div>
+
+        <div class="section collapsible collapsed" data-section="lfo2">
+          <button type="button" class="section-label section-toggle" data-act="toggle-lfo2" aria-expanded="false">
+            LFO 2 / Modulation <span class="chev">▾</span>
+          </button>
+          <div class="section-content">
+            <div class="row-select">
+              <select class="control" data-p="lfo2Target">
+                <option value="none">Target: Off</option>
+                <option value="pitch">Target: Pitch</option>
+                <option value="filter">Target: Filter</option>
+                <option value="amplitude">Target: Amplitude</option>
+              </select>
+            </div>
+            <div class="toggle-row" data-group="lfo2rate-toggle">
+              <button class="toggle-pill" data-rate="hz">Hz</button>
+              <button class="toggle-pill" data-rate="sync">Sync</button>
+            </div>
+            <div class="row-select" data-group="lfo2-sync-select" style="display:none;">
+              <select class="control" data-p="lfo2RateDivision"></select>
+            </div>
+            <div class="knob-grid n2" data-group="lfo2-knobs"></div>
           </div>
         </div>
 
@@ -899,6 +943,9 @@ class Voice{
     const targetSel=panel.querySelector('[data-p="lfoTarget"]');
     targetSel.value=p.lfoTarget;
     targetSel.addEventListener('change',e=>{ p.lfoTarget=e.target.value; this._liveUpdate(); });
+    const targetSel2=panel.querySelector('[data-p="lfo2Target"]');
+    targetSel2.value=p.lfo2Target;
+    targetSel2.addEventListener('change',e=>{ p.lfo2Target=e.target.value; this._liveUpdate(); });
 
     const divSel=panel.querySelector('[data-p="lfoRateDivision"]');
     LFO_DIVISIONS.forEach(d=>{
@@ -906,6 +953,13 @@ class Voice{
     });
     divSel.value=p.lfoRateDivision;
     divSel.addEventListener('change',e=>{ p.lfoRateDivision=parseFloat(e.target.value); this._liveUpdate(); });
+
+    const divSel2=panel.querySelector('[data-p="lfo2RateDivision"]');
+    LFO_DIVISIONS.forEach(d=>{
+      const o=document.createElement('option'); o.value=d.beats; o.textContent=d.label; divSel2.appendChild(o);
+    });
+    divSel2.value=p.lfo2RateDivision;
+    divSel2.addEventListener('change',e=>{ p.lfo2RateDivision=parseFloat(e.target.value); this._liveUpdate(); });
 
     const rateToggleWrap=panel.querySelector('[data-group="lforate-toggle"]');
     const syncSelectWrap=panel.querySelector('[data-group="lfo-sync-select"]');
@@ -923,6 +977,24 @@ class Voice{
     });
     rateToggleWrap.querySelectorAll('.toggle-pill').forEach(b=>{
       b.addEventListener('click',()=>{ p.lfoRateMode=b.dataset.rate; paintRateToggle(); this._liveUpdate(); });
+    });
+
+    const rateToggleWrap2=panel.querySelector('[data-group="lfo2rate-toggle"]');
+    const syncSelectWrap2=panel.querySelector('[data-group="lfo2-sync-select"]');
+    const lfoSection2=panel.querySelector('[data-section="lfo2"]');
+    const lfoToggleBtn2=panel.querySelector('[data-act="toggle-lfo2"]');
+    const paintRateToggle2=()=>{
+      rateToggleWrap2.querySelectorAll('.toggle-pill').forEach(b=>b.classList.toggle('active', b.dataset.rate===p.lfo2RateMode));
+      syncSelectWrap2.style.display = p.lfo2RateMode==='sync' ? 'flex':'none';
+      if(this._lfoRateKnob2) this._lfoRateKnob2.el.style.display = p.lfo2RateMode==='sync' ? 'none':'flex';
+    };
+    lfoToggleBtn2.addEventListener('click',()=>{
+      const collapsed=lfoSection2.classList.toggle('collapsed');
+      lfoSection2.classList.toggle('expanded', !collapsed);
+      lfoToggleBtn2.setAttribute('aria-expanded', String(!collapsed));
+    });
+    rateToggleWrap2.querySelectorAll('.toggle-pill').forEach(b=>{
+      b.addEventListener('click',()=>{ p.lfo2RateMode=b.dataset.rate; paintRateToggle2(); this._liveUpdate(); });
     });
 
     /* header buttons */
@@ -965,7 +1037,15 @@ class Voice{
       formatter:v=>v.toFixed(2)+'Hz', onChange:v=>{p.lfoRateHz=v; this._liveUpdate();}});
     this._mk(lfoK,{label:'DEPTH',min:0,max:1,value:p.lfoDepth,default:0.3,step:0.01,
       formatter:v=>Math.round(v*100)+'%', onChange:v=>{p.lfoDepth=v; this._liveUpdate();}});
+
+    const lfoK2=panel.querySelector('[data-group="lfo2-knobs"]');
+    this._lfoRateKnob2=this._mk(lfoK2,{label:'RATE',min:0.02,max:20,value:p.lfo2RateHz,default:0.5,log:true,unit:'Hz',
+      formatter:v=>v.toFixed(2)+'Hz', onChange:v=>{p.lfo2RateHz=v; this._liveUpdate();}});
+    this._mk(lfoK2,{label:'DEPTH',min:0,max:1,value:p.lfo2Depth,default:0,step:0.01,
+      formatter:v=>Math.round(v*100)+'%', onChange:v=>{p.lfo2Depth=v; this._liveUpdate();}});
+
     paintRateToggle();
+    paintRateToggle2();
 
     const lvl=panel.querySelector('[data-group="level"]');
     this._mk(lvl,{label:'LEVEL',min:0,max:1,value:p.level,default:0.7,step:0.01,
