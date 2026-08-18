@@ -1,3 +1,23 @@
+export type DelayTimeMode = 'seconds' | 'frequency' | 'measures';
+
+export function convertDelayTimeValue(
+  value: number,
+  mode: DelayTimeMode = 'seconds',
+  bpm: number = 120
+): number {
+  const safeValue = Math.max(value, 0.001);
+
+  switch (mode) {
+    case 'frequency':
+      return 1 / safeValue;
+    case 'measures':
+      return (safeValue * 60) / Math.max(bpm, 1);
+    case 'seconds':
+    default:
+      return safeValue;
+  }
+}
+
 export function createDelay(audioContext: AudioContext): {
   delay: DelayNode;
   delayFeedback: GainNode;
@@ -21,9 +41,11 @@ export function createDelay(audioContext: AudioContext): {
 export function updateDelayTime(
   delay: DelayNode, 
   time: number, 
-  audioContext: AudioContext
+  audioContext: AudioContext,
+  mode: DelayTimeMode = 'seconds',
+  bpm: number = 120
 ): void {
-  delay.delayTime.setValueAtTime(time, audioContext.currentTime);
+  delay.delayTime.setValueAtTime(convertDelayTimeValue(time, mode, bpm), audioContext.currentTime);
 }
 
 export function updateDelayFeedback(

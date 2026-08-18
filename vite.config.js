@@ -15,6 +15,7 @@ export default defineConfig({
         original: resolve(__dirname, 'src/original.html'),
         twoLfos: resolve(__dirname, 'src/two-lfos.html'),
         tsSynth: resolve(__dirname, 'src/ts-synth.html'),
+        droneSynth: resolve(__dirname, 'src/drone-synth.html'),
         // Add more pages here as needed
         // dashboard: resolve(__dirname, 'src/dashboard.html'),
         // login: resolve(__dirname, 'src/login.html'),
