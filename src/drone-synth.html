@@ -151,6 +151,18 @@
   }
   .section-label::after{content:'';flex:1;height:1px;background:var(--line-soft);}
 
+  .section.collapsible .section-content{display:block;}
+  .section.collapsible.collapsed .section-content{display:none;}
+  .section-toggle{
+    width:100%;background:none;border:none;padding:0;color:inherit;
+    text-align:left;cursor:pointer;
+  }
+  .section-toggle .chev{
+    margin-left:auto;color:var(--text-faint);font-size:11px;line-height:1;
+    transition:transform .16s ease;
+  }
+  .section.collapsible.collapsed .section-toggle .chev{transform:rotate(-90deg);}
+
   .row-select{display:flex;gap:6px;margin-bottom:8px;}
   select.control{
     flex:1;background:var(--bg2);color:var(--text);border:1px solid var(--line);
@@ -840,24 +852,28 @@ class Voice{
           <div class="knob-grid n3" data-group="filter"></div>
         </div>
 
-        <div class="section">
-          <p class="section-label">LFO / Modulation</p>
-          <div class="row-select">
-            <select class="control" data-p="lfoTarget">
-              <option value="none">Target: Off</option>
-              <option value="pitch">Target: Pitch</option>
-              <option value="filter">Target: Filter</option>
-              <option value="amplitude">Target: Amplitude</option>
-            </select>
+        <div class="section collapsible expanded" data-section="lfo">
+          <button type="button" class="section-label section-toggle" data-act="toggle-lfo" aria-expanded="true">
+            LFO / Modulation <span class="chev">▾</span>
+          </button>
+          <div class="section-content">
+            <div class="row-select">
+              <select class="control" data-p="lfoTarget">
+                <option value="none">Target: Off</option>
+                <option value="pitch">Target: Pitch</option>
+                <option value="filter">Target: Filter</option>
+                <option value="amplitude">Target: Amplitude</option>
+              </select>
+            </div>
+            <div class="toggle-row" data-group="lforate-toggle">
+              <button class="toggle-pill" data-rate="hz">Hz</button>
+              <button class="toggle-pill" data-rate="sync">Sync</button>
+            </div>
+            <div class="row-select" data-group="lfo-sync-select" style="display:none;">
+              <select class="control" data-p="lfoRateDivision"></select>
+            </div>
+            <div class="knob-grid n2" data-group="lfo-knobs"></div>
           </div>
-          <div class="toggle-row" data-group="lforate-toggle">
-            <button class="toggle-pill" data-rate="hz">Hz</button>
-            <button class="toggle-pill" data-rate="sync">Sync</button>
-          </div>
-          <div class="row-select" data-group="lfo-sync-select" style="display:none;">
-            <select class="control" data-p="lfoRateDivision"></select>
-          </div>
-          <div class="knob-grid n2" data-group="lfo-knobs"></div>
         </div>
 
         <div class="section">
@@ -893,11 +909,18 @@ class Voice{
 
     const rateToggleWrap=panel.querySelector('[data-group="lforate-toggle"]');
     const syncSelectWrap=panel.querySelector('[data-group="lfo-sync-select"]');
+    const lfoSection=panel.querySelector('[data-section="lfo"]');
+    const lfoToggleBtn=panel.querySelector('[data-act="toggle-lfo"]');
     const paintRateToggle=()=>{
       rateToggleWrap.querySelectorAll('.toggle-pill').forEach(b=>b.classList.toggle('active', b.dataset.rate===p.lfoRateMode));
       syncSelectWrap.style.display = p.lfoRateMode==='sync' ? 'flex':'none';
       if(this._lfoRateKnob) this._lfoRateKnob.el.style.display = p.lfoRateMode==='sync' ? 'none':'flex';
     };
+    lfoToggleBtn.addEventListener('click',()=>{
+      const collapsed=lfoSection.classList.toggle('collapsed');
+      lfoSection.classList.toggle('expanded', !collapsed);
+      lfoToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+    });
     rateToggleWrap.querySelectorAll('.toggle-pill').forEach(b=>{
       b.addEventListener('click',()=>{ p.lfoRateMode=b.dataset.rate; paintRateToggle(); this._liveUpdate(); });
     });
