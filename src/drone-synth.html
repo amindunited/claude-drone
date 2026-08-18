@@ -101,11 +101,18 @@
   .settings-control{
     display:flex;align-items:center;gap:6px;padding:6px;
     background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+    flex-wrap:wrap;
   }
+  .settings-control select,
   .settings-control button{
     background:var(--panel3);border:1px solid var(--line);color:var(--text-dim);
     border-radius:4px;padding:6px 10px;font-family:var(--mono);font-size:10px;
     text-transform:uppercase;letter-spacing:.06em;
+  }
+  .settings-control select{
+    min-width:148px;
+    text-transform:none;
+    background:var(--bg2);
   }
   .settings-control button:hover{color:var(--amber-hi);border-color:var(--amber-dim);}
 
@@ -324,6 +331,14 @@
     </label>
 
     <div class="settings-control">
+      <select id="presetSelect" aria-label="Preset library">
+        <option value="">Preset Library</option>
+      </select>
+      <button id="savePresetBtn" type="button">Save Preset</button>
+      <button id="renamePresetBtn" type="button">Rename</button>
+      <button id="duplicatePresetBtn" type="button">Duplicate</button>
+      <button id="deletePresetBtn" type="button">Delete Preset</button>
+      <button id="factoryResetBtn" type="button">Factory Reset</button>
       <button id="saveSettingsBtn" type="button">Save JSON</button>
       <button id="loadSettingsBtn" type="button">Load JSON</button>
       <input id="loadSettingsInput" type="file" accept="application/json,.json" hidden />
@@ -886,10 +901,85 @@ const AppState = {
   fx:cloneData(DEFAULT_SYNTH_SETTINGS.fx),
 };
 
+const STORAGE_KEYS = {
+  autosave:'strata.autosave.v1',
+  presets:'strata.presets.v1',
+};
+
+const PresetState = {
+  items:{},
+  selectedName:'',
+};
+
+let persistTimer=null;
+let persistSuspended=false;
+
 const SettingsUI = {
   global:{bpm:null, master:null},
   fx:{distortion:{}, chorus:{}, delay:{}, reverb:{}},
+  presetSelect:null,
 };
+
+function readStorageJson(key, fallback){
+  try{
+    const raw=window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch(error){
+    return fallback;
+  }
+}
+
+function writeStorageJson(key, value){
+  try{
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch(error){}
+}
+
+function updatePresetSelect(){
+  if(!SettingsUI.presetSelect) return;
+  const select=SettingsUI.presetSelect;
+  select.innerHTML='';
+  const placeholder=document.createElement('option');
+  placeholder.value='';
+  placeholder.textContent='Preset Library';
+  select.appendChild(placeholder);
+  Object.keys(PresetState.items).sort((a,b)=>a.localeCompare(b)).forEach(name=>{
+    const option=document.createElement('option');
+    option.value=name;
+    option.textContent=name;
+    select.appendChild(option);
+  });
+  select.value = PresetState.selectedName && PresetState.items[PresetState.selectedName] ? PresetState.selectedName : '';
+}
+
+function persistPresets(){
+  writeStorageJson(STORAGE_KEYS.presets, PresetState.items);
+  updatePresetSelect();
+}
+
+function clearAutoSave(){
+  try{
+    window.localStorage.removeItem(STORAGE_KEYS.autosave);
+  } catch(error){}
+}
+
+function scheduleAutoSave(){
+  if(persistSuspended || !booted) return;
+  if(persistTimer) window.clearTimeout(persistTimer);
+  persistTimer=window.setTimeout(()=>{
+    persistTimer=null;
+    writeStorageJson(STORAGE_KEYS.autosave, snapshotSettings());
+  }, 120);
+}
+
+function withPersistenceSuspended(fn){
+  persistSuspended=true;
+  try{
+    return fn();
+  } finally {
+    persistSuspended=false;
+  }
+}
 
 function normalizeVoiceSettings(voice, index){
   const source=voice && typeof voice==='object' ? voice : {};
@@ -925,6 +1015,16 @@ function normalizeSettings(raw){
     },
     voices:voicesSource.map(normalizeVoiceSettings),
   };
+}
+
+function getStartupSettings(){
+  const autosave=readStorageJson(STORAGE_KEYS.autosave, null);
+  if(!autosave) return cloneData(DEFAULT_SYNTH_SETTINGS);
+  try{
+    return normalizeSettings(autosave);
+  } catch(error){
+    return cloneData(DEFAULT_SYNTH_SETTINGS);
+  }
 }
 
 function delayModeDefaultValue(mode){
@@ -1145,6 +1245,7 @@ class Voice{
     this.enabled=!!enabled;
     if(!this.enabled) this.allNotesOff();
     this._paintEnabled();
+    scheduleAutoSave();
   }
   setLevel(v){ this.params.level=v; this.levelGain.gain.setTargetAtTime(v, Engine.ctx.currentTime, 0.02); }
   setSend(k,v){ this.params.sends[k]=v; this.sendGains[k].gain.setTargetAtTime(v, Engine.ctx.currentTime, 0.02); }
@@ -1269,32 +1370,32 @@ class Voice{
     /* wire selects */
     panel.querySelector('[data-p="osc"]').value=p.osc;
     panel.querySelector('[data-p="osc"]').addEventListener('change',e=>{
-      p.osc=e.target.value; this._renderOscKnobs(); this._liveUpdate();
+      p.osc=e.target.value; this._renderOscKnobs(); this._liveUpdate(); scheduleAutoSave();
     });
     panel.querySelector('[data-p="filterType"]').value=p.filterType;
     panel.querySelector('[data-p="filterType"]').addEventListener('change',e=>{
-      p.filterType=e.target.value; this._liveUpdate();
+      p.filterType=e.target.value; this._liveUpdate(); scheduleAutoSave();
     });
     const targetSel=panel.querySelector('[data-p="lfoTarget"]');
     targetSel.value=p.lfoTarget;
-    targetSel.addEventListener('change',e=>{ p.lfoTarget=e.target.value; this._liveUpdate(); });
+    targetSel.addEventListener('change',e=>{ p.lfoTarget=e.target.value; this._liveUpdate(); scheduleAutoSave(); });
     const targetSel2=panel.querySelector('[data-p="lfo2Target"]');
     targetSel2.value=p.lfo2Target;
-    targetSel2.addEventListener('change',e=>{ p.lfo2Target=e.target.value; this._liveUpdate(); });
+    targetSel2.addEventListener('change',e=>{ p.lfo2Target=e.target.value; this._liveUpdate(); scheduleAutoSave(); });
 
     const divSel=panel.querySelector('[data-p="lfoRateDivision"]');
     LFO_DIVISIONS.forEach(d=>{
       const o=document.createElement('option'); o.value=d.beats; o.textContent=d.label; divSel.appendChild(o);
     });
     divSel.value=p.lfoRateDivision;
-    divSel.addEventListener('change',e=>{ p.lfoRateDivision=parseFloat(e.target.value); this._liveUpdate(); });
+    divSel.addEventListener('change',e=>{ p.lfoRateDivision=parseFloat(e.target.value); this._liveUpdate(); scheduleAutoSave(); });
 
     const divSel2=panel.querySelector('[data-p="lfo2RateDivision"]');
     LFO_DIVISIONS.forEach(d=>{
       const o=document.createElement('option'); o.value=d.beats; o.textContent=d.label; divSel2.appendChild(o);
     });
     divSel2.value=p.lfo2RateDivision;
-    divSel2.addEventListener('change',e=>{ p.lfo2RateDivision=parseFloat(e.target.value); this._liveUpdate(); });
+    divSel2.addEventListener('change',e=>{ p.lfo2RateDivision=parseFloat(e.target.value); this._liveUpdate(); scheduleAutoSave(); });
 
     const rateToggleWrap=panel.querySelector('[data-group="lforate-toggle"]');
     const syncSelectWrap=panel.querySelector('[data-group="lfo-sync-select"]');
@@ -1311,7 +1412,7 @@ class Voice{
       lfoToggleBtn.setAttribute('aria-expanded', String(!collapsed));
     });
     rateToggleWrap.querySelectorAll('.toggle-pill').forEach(b=>{
-      b.addEventListener('click',()=>{ p.lfoRateMode=b.dataset.rate; paintRateToggle(); this._liveUpdate(); });
+      b.addEventListener('click',()=>{ p.lfoRateMode=b.dataset.rate; paintRateToggle(); this._liveUpdate(); scheduleAutoSave(); });
     });
 
     const rateToggleWrap2=panel.querySelector('[data-group="lfo2rate-toggle"]');
@@ -1329,7 +1430,7 @@ class Voice{
       lfoToggleBtn2.setAttribute('aria-expanded', String(!collapsed));
     });
     rateToggleWrap2.querySelectorAll('.toggle-pill').forEach(b=>{
-      b.addEventListener('click',()=>{ p.lfo2RateMode=b.dataset.rate; paintRateToggle2(); this._liveUpdate(); });
+      b.addEventListener('click',()=>{ p.lfo2RateMode=b.dataset.rate; paintRateToggle2(); this._liveUpdate(); scheduleAutoSave(); });
     });
 
     /* header buttons */
@@ -1340,7 +1441,7 @@ class Voice{
     const enableBtn=panel.querySelector('[data-act="enable"]');
     this.enableBtn=enableBtn;
     enableBtn.addEventListener('click',()=>{ this.setEnabled(!this.enabled); });
-    panel.querySelector('.vp-name').addEventListener('input',e=>{ this.name=e.target.value; });
+    panel.querySelector('.vp-name').addEventListener('input',e=>{ this.name=e.target.value; scheduleAutoSave(); });
 
     /* knobs */
     this._renderOscKnobs();
@@ -1391,7 +1492,13 @@ class Voice{
     this._paintEnabled();
   }
   _mk(container,opts){
-    const k=new Knob(opts);
+    const onChange=opts.onChange || function(){};
+    const k=new Knob(Object.assign({}, opts, {
+      onChange:value=>{
+        onChange(value);
+        scheduleAutoSave();
+      }
+    }));
     container.appendChild(k.el);
     return k;
   }
@@ -1424,6 +1531,7 @@ function addVoice(nameOrConfig, preset){
   }
   const v=new Voice(name||('Voice '+(voices.length+1)), params, enabled);
   voices.push(v);
+  scheduleAutoSave();
   return v;
 }
 function clearVoices(){
@@ -1437,6 +1545,7 @@ function removeVoice(id){
   if(idx<0) return;
   voices[idx].dispose();
   voices.splice(idx,1);
+  scheduleAutoSave();
 }
 function replaceVoices(nextVoices){
   clearVoices();
@@ -1510,12 +1619,84 @@ function applyFxSettings(){
 }
 
 function loadSettings(raw){
-  const next=normalizeSettings(raw);
-  AppState.global=cloneData(next.global);
-  AppState.fx=cloneData(next.fx);
-  applyGlobalSettings();
-  applyFxSettings();
-  replaceVoices(next.voices);
+  return withPersistenceSuspended(()=>{
+    const next=normalizeSettings(raw);
+    AppState.global=cloneData(next.global);
+    AppState.fx=cloneData(next.fx);
+    applyGlobalSettings();
+    applyFxSettings();
+    replaceVoices(next.voices);
+    scheduleAutoSave();
+    return next;
+  });
+}
+
+function loadPresetLibrary(){
+  const stored=readStorageJson(STORAGE_KEYS.presets, {});
+  PresetState.items = stored && typeof stored==='object' ? stored : {};
+  updatePresetSelect();
+}
+
+function savePreset(){
+  const suggestedName=PresetState.selectedName || 'New Preset';
+  const name=(window.prompt('Preset name', suggestedName) || '').trim();
+  if(!name) return;
+  const preset=snapshotSettings();
+  preset.meta=Object.assign({}, preset.meta, {name});
+  PresetState.items[name]=preset;
+  PresetState.selectedName=name;
+  persistPresets();
+}
+
+function renamePreset(){
+  const currentName=PresetState.selectedName || (SettingsUI.presetSelect ? SettingsUI.presetSelect.value : '');
+  if(!currentName || !PresetState.items[currentName]) return;
+  const nextName=(window.prompt('Rename preset', currentName) || '').trim();
+  if(!nextName || nextName===currentName) return;
+  const preset=PresetState.items[currentName];
+  delete PresetState.items[currentName];
+  preset.meta=Object.assign({}, preset.meta, {name:nextName});
+  PresetState.items[nextName]=preset;
+  PresetState.selectedName=nextName;
+  persistPresets();
+}
+
+function duplicatePreset(){
+  const currentName=PresetState.selectedName || (SettingsUI.presetSelect ? SettingsUI.presetSelect.value : '');
+  const baseSettings=currentName && PresetState.items[currentName] ? PresetState.items[currentName] : snapshotSettings();
+  const suggestedName=currentName ? `${currentName} Copy` : 'Preset Copy';
+  const nextName=(window.prompt('Duplicate preset as', suggestedName) || '').trim();
+  if(!nextName) return;
+  const copy=cloneData(baseSettings);
+  copy.meta=Object.assign({}, copy.meta, {name:nextName});
+  PresetState.items[nextName]=copy;
+  PresetState.selectedName=nextName;
+  persistPresets();
+}
+
+function applyPreset(name){
+  const preset=PresetState.items[name];
+  if(!preset) return;
+  PresetState.selectedName=name;
+  updatePresetSelect();
+  loadSettings(preset);
+}
+
+function deletePreset(){
+  const name=PresetState.selectedName || (SettingsUI.presetSelect ? SettingsUI.presetSelect.value : '');
+  if(!name || !PresetState.items[name]) return;
+  if(!window.confirm(`Delete preset "${name}"?`)) return;
+  delete PresetState.items[name];
+  PresetState.selectedName='';
+  persistPresets();
+}
+
+function factoryReset(){
+  if(!window.confirm('Reset the current patch to factory defaults and clear autosave?')) return;
+  clearAutoSave();
+  PresetState.selectedName='';
+  updatePresetSelect();
+  loadSettings(cloneData(DEFAULT_SYNTH_SETTINGS));
 }
 
 /* ============================================================
@@ -1675,11 +1856,13 @@ document.getElementById('octUp').addEventListener('click',()=>{
   octaveBase=clamp(octaveBase+12,12,96);
   AppState.global.octaveBase=octaveBase;
   buildKeyboard();
+  scheduleAutoSave();
 });
 document.getElementById('octDown').addEventListener('click',()=>{
   octaveBase=clamp(octaveBase-12,12,96);
   AppState.global.octaveBase=octaveBase;
   buildKeyboard();
+  scheduleAutoSave();
 });
 window.addEventListener('resize', buildKeyboard);
 
@@ -1703,12 +1886,14 @@ window.addEventListener('keydown',(e)=>{
     octaveBase=clamp(octaveBase-12,12,96);
     AppState.global.octaveBase=octaveBase;
     buildKeyboard();
+    scheduleAutoSave();
     return;
   }
   if(k==='x'){
     octaveBase=clamp(octaveBase+12,12,96);
     AppState.global.octaveBase=octaveBase;
     buildKeyboard();
+    scheduleAutoSave();
     return;
   }
   if(KEY_MAP.hasOwnProperty(k) && !heldKeys.has(k)){
@@ -1778,6 +1963,7 @@ function mountGlobalKnobs(){
     formatter:v=>Math.round(v), onChange:v=>{
       AppState.global.bpm=Math.round(v);
       Engine.setBpm(AppState.global.bpm);
+      scheduleAutoSave();
     }});
   bpmMount.replaceWith(bpmKnob.el);
   SettingsUI.global.bpm=bpmKnob;
@@ -1787,6 +1973,7 @@ function mountGlobalKnobs(){
     formatter:v=>Math.round(v*100)+'%', onChange:v=>{
       AppState.global.master=v;
       if(Engine.master) Engine.master.gain.setTargetAtTime(v,Engine.ctx.currentTime,0.02);
+      scheduleAutoSave();
     }});
   masterMount.replaceWith(masterKnob.el);
   SettingsUI.global.master=masterKnob;
@@ -1831,6 +2018,20 @@ document.getElementById('addVoiceBtn').addEventListener('click',()=>{ addVoice()
 document.getElementById('recordEnable').addEventListener('change',(e)=>{
   Recorder.setEnabled(e.target.checked);
 });
+SettingsUI.presetSelect=document.getElementById('presetSelect');
+SettingsUI.presetSelect.addEventListener('change',(e)=>{
+  const name=e.target.value;
+  if(!name){
+    PresetState.selectedName='';
+    return;
+  }
+  applyPreset(name);
+});
+document.getElementById('savePresetBtn').addEventListener('click', savePreset);
+document.getElementById('renamePresetBtn').addEventListener('click', renamePreset);
+document.getElementById('duplicatePresetBtn').addEventListener('click', duplicatePreset);
+document.getElementById('deletePresetBtn').addEventListener('click', deletePreset);
+document.getElementById('factoryResetBtn').addEventListener('click', factoryReset);
 document.getElementById('saveSettingsBtn').addEventListener('click', downloadSettings);
 document.getElementById('loadSettingsBtn').addEventListener('click',()=>{
   document.getElementById('loadSettingsInput').click();
@@ -1844,12 +2045,17 @@ document.getElementById('loadSettingsInput').addEventListener('change',async (e)
 let booted=false;
 function boot(){
   if(booted) return;
+  const startupSettings=getStartupSettings();
+  AppState.global=cloneData(startupSettings.global);
+  AppState.fx=cloneData(startupSettings.fx);
+  octaveBase=AppState.global.octaveBase;
   booted=true;
   Engine.init();
   Recorder.init();
+  loadPresetLibrary();
   buildFxPage();
   mountGlobalKnobs();
-  loadSettings(DEFAULT_SYNTH_SETTINGS);
+  loadSettings(startupSettings);
   setupMidi();
 }
 
