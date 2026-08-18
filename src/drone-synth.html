@@ -266,6 +266,17 @@
     width:22px;height:22px;border-radius:4px;font-family:var(--mono);
   }
   .kb-toolbar button.small:hover{color:var(--amber-hi);border-color:var(--amber-dim);}
+  .kb-toolbar .sustain-btn{
+    background:var(--bg2);border:1px solid var(--line);color:var(--text-dim);
+    min-width:78px;height:28px;border-radius:5px;padding:0 10px;
+    font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+    transition:background .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease;
+  }
+  .kb-toolbar .sustain-btn:hover{color:var(--amber-hi);border-color:var(--amber-dim);}
+  .kb-toolbar .sustain-btn.active{
+    background:var(--amber-dim);border-color:var(--amber);color:#fff2d8;
+    box-shadow:0 0 10px rgba(226,160,63,.22);
+  }
   .kb-toolbar .note-hint{font-family:var(--mono);font-size:10px;color:var(--text-faint);}
 
   #keyboard{position:relative;height:100px;display:flex;}
@@ -366,6 +377,7 @@
         <span id="octLabel">OCT 4</span>
         <button class="small" id="octUp">+</button>
       </div>
+      <button id="sustainToggle" class="sustain-btn" type="button" aria-pressed="false">Sustain Off</button>
       <span class="note-hint">Keyboard row A W S E D F T G Y H U J K plays notes · Z / X shifts octave</span>
     </div>
     <div id="keyboard"></div>
@@ -1806,6 +1818,69 @@ function buildFxPage(){
    ============================================================ */
 let octaveBase=48; // MIDI note for "C" of octave label
 const activeVisual=new Map();
+const activeNoteCounts=new Map();
+const sustainedNotes=new Set();
+let sustainEnabled=false;
+
+function noteVisualElement(note){
+  return document.querySelector(`.wkey[data-note="${note}"],.bkey[data-note="${note}"]`);
+}
+
+function setNoteVisualActive(note, active){
+  const el=noteVisualElement(note);
+  if(el) el.classList.toggle('active', active);
+}
+
+function paintSustainButton(){
+  const btn=document.getElementById('sustainToggle');
+  if(!btn) return;
+  btn.classList.toggle('active', sustainEnabled);
+  btn.setAttribute('aria-pressed', String(sustainEnabled));
+  btn.textContent=sustainEnabled ? 'Sustain On' : 'Sustain Off';
+}
+
+function flushSustainedNotes(){
+  sustainedNotes.forEach(note=>{
+    if((activeNoteCounts.get(note) || 0) > 0) return;
+    globalNoteOff(note);
+    activeVisual.delete(note);
+    setNoteVisualActive(note, false);
+    sustainedNotes.delete(note);
+  });
+}
+
+function setSustainEnabled(enabled){
+  sustainEnabled=!!enabled;
+  paintSustainButton();
+  if(!sustainEnabled) flushSustainedNotes();
+}
+
+function triggerGlobalNoteOn(note, velocity){
+  const count=(activeNoteCounts.get(note) || 0) + 1;
+  activeNoteCounts.set(note, count);
+  sustainedNotes.delete(note);
+  globalNoteOn(note, velocity);
+  setNoteVisualActive(note, true);
+}
+
+function triggerGlobalNoteOff(note){
+  const count=Math.max(0, (activeNoteCounts.get(note) || 0) - 1);
+  if(count===0) activeNoteCounts.delete(note);
+  else activeNoteCounts.set(note, count);
+
+  if(count>0) return;
+  if(sustainEnabled){
+    sustainedNotes.add(note);
+    setNoteVisualActive(note, true);
+    return;
+  }
+
+  sustainedNotes.delete(note);
+  globalNoteOff(note);
+  activeVisual.delete(note);
+  setNoteVisualActive(note, false);
+}
+
 function buildKeyboard(){
   const kb=document.getElementById('keyboard');
   kb.innerHTML='';
@@ -1843,8 +1918,8 @@ function buildKeyboard(){
 
   kb.querySelectorAll('.wkey,.bkey').forEach(el=>{
     const note=parseInt(el.dataset.note,10);
-    const press=(e)=>{ e.preventDefault(); Engine.resume(); globalNoteOn(note,100); el.classList.add('active'); activeVisual.set(note,el); };
-    const release=(e)=>{ if(e)e.preventDefault(); globalNoteOff(note); el.classList.remove('active'); activeVisual.delete(note); };
+    const press=(e)=>{ e.preventDefault(); Engine.resume(); triggerGlobalNoteOn(note,100); activeVisual.set(note,el); };
+    const release=(e)=>{ if(e)e.preventDefault(); triggerGlobalNoteOff(note); if(!sustainEnabled) activeVisual.delete(note); };
     el.addEventListener('pointerdown',press);
     el.addEventListener('pointerup',release);
     el.addEventListener('pointerleave',release);
@@ -1900,9 +1975,7 @@ window.addEventListener('keydown',(e)=>{
     heldKeys.add(k);
     Engine.resume();
     const note=octaveBase+KEY_MAP[k];
-    globalNoteOn(note,100);
-    const el=document.querySelector(`.wkey[data-note="${note}"],.bkey[data-note="${note}"]`);
-    if(el) el.classList.add('active');
+    triggerGlobalNoteOn(note,100);
   }
 });
 window.addEventListener('keyup',(e)=>{
@@ -1910,9 +1983,7 @@ window.addEventListener('keyup',(e)=>{
   if(heldKeys.has(k)){
     heldKeys.delete(k);
     const note=octaveBase+KEY_MAP[k];
-    globalNoteOff(note);
-    const el=document.querySelector(`.wkey[data-note="${note}"],.bkey[data-note="${note}"]`);
-    if(el) el.classList.remove('active');
+    triggerGlobalNoteOff(note);
   }
 });
 
@@ -1942,8 +2013,8 @@ function setupMidi(){
       const [status,d1,d2]=msg.data;
       const cmd=status & 0xf0;
       Engine.resume();
-      if(cmd===0x90 && d2>0) globalNoteOn(d1,d2);
-      else if(cmd===0x80 || (cmd===0x90 && d2===0)) globalNoteOff(d1);
+      if(cmd===0x90 && d2>0) triggerGlobalNoteOn(d1,d2);
+      else if(cmd===0x80 || (cmd===0x90 && d2===0)) triggerGlobalNoteOff(d1);
     }
     function bindAll(){ inputs.forEach(i=>{ i.onmidimessage=(sel.value==='all'||sel.value===i.id)?handle:null; }); }
     sel.addEventListener('change',bindAll);
@@ -2014,6 +2085,9 @@ document.getElementById('tabFx').addEventListener('click',()=>{
   document.getElementById('fxView').classList.add('active');
   document.getElementById('synthView').classList.remove('active');
 });
+document.getElementById('sustainToggle').addEventListener('click',()=>{
+  setSustainEnabled(!sustainEnabled);
+});
 document.getElementById('addVoiceBtn').addEventListener('click',()=>{ addVoice(); });
 document.getElementById('recordEnable').addEventListener('change',(e)=>{
   Recorder.setEnabled(e.target.checked);
@@ -2057,6 +2131,7 @@ function boot(){
   mountGlobalKnobs();
   loadSettings(startupSettings);
   setupMidi();
+  paintSustainButton();
 }
 
 document.getElementById('startBtn').addEventListener('click',()=>{
