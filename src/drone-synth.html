@@ -191,6 +191,14 @@
   .knob-wrap svg{cursor:ns-resize;touch-action:none;}
   .knob-wrap .k-label{font-family:var(--mono);font-size:8.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;text-align:center;}
   .knob-wrap .k-val{font-family:var(--mono);font-size:9.5px;color:var(--amber-hi);}
+  .knob-wrap .k-val{cursor:text;min-height:14px;line-height:1.2;}
+  .knob-wrap .k-val[tabindex]{outline:none;}
+  .knob-wrap .k-val-input{
+    width:58px;background:var(--bg2);color:var(--amber-hi);border:1px solid var(--amber-dim);
+    border-radius:3px;padding:1px 4px;text-align:center;
+    font-family:var(--mono);font-size:9.5px;line-height:1.2;
+  }
+  .knob-wrap .k-val-input:focus{outline:none;border-color:var(--amber-hi);}
   .knob-wrap.disabled{opacity:.3;pointer-events:none;}
 
   .toggle-row{display:flex;gap:6px;margin-bottom:8px;}
@@ -367,8 +375,10 @@ class Knob{
     this.label=opts.label||'';
     this.unit=opts.unit||'';
     this.formatter=opts.formatter||null;
+    this.parser=opts.parser||null;
     this.onChange=opts.onChange||function(){};
     this.size=opts.size||46;
+    this.editing=false;
     this._build();
     this._render();
   }
@@ -403,12 +413,14 @@ class Knob{
         <g class="k-ptr"><line x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy-(r-9)}" stroke="#f4c374" stroke-width="2" stroke-linecap="round"/></g>
       </svg>
       <div class="k-label">${this.label}</div>
-      <div class="k-val"></div>
+      <div class="k-val" tabindex="0" title="Click to type a value"></div>
+      <input class="k-val-input" type="text" inputmode="decimal" aria-label="Edit ${this.label || 'knob'} value" style="display:none;" />
     `;
     this.el=wrap;
     this.arcEl=wrap.querySelector('.k-arc');
     this.ptrEl=wrap.querySelector('.k-ptr');
     this.valEl=wrap.querySelector('.k-val');
+    this.inputEl=wrap.querySelector('.k-val-input');
     this._cx=cx; this._cy=cy; this._r=r;
 
     let dragging=false, startY=0, startFrac=0;
@@ -441,13 +453,72 @@ class Knob{
       this.value=this._fromFrac(f); this._render(); this.onChange(this.value);
       e.preventDefault();
     },{passive:false});
+
+    const beginEdit=()=>{
+      if(this.editing) return;
+      this.editing=true;
+      this.inputEl.value=this.valEl.textContent || String(this.value);
+      this.valEl.style.display='none';
+      this.inputEl.style.display='block';
+      this.inputEl.focus();
+      this.inputEl.select();
+    };
+    const finishEdit=(apply)=>{
+      if(!this.editing) return;
+      if(apply){
+        const next=this._parseTypedValue(this.inputEl.value);
+        if(next!==null){
+          this.value=clamp(next,this.min,this.max);
+          this.onChange(this.value);
+        }
+      }
+      this.editing=false;
+      this.inputEl.style.display='none';
+      this.valEl.style.display='block';
+      this._render();
+      this.valEl.focus();
+    };
+
+    this.valEl.addEventListener('click', beginEdit);
+    this.valEl.addEventListener('keydown',(e)=>{
+      if(e.key==='Enter' || e.key===' '){
+        e.preventDefault();
+        beginEdit();
+      }
+    });
+    this.inputEl.addEventListener('keydown',(e)=>{
+      if(e.key==='Enter'){
+        e.preventDefault();
+        finishEdit(true);
+      } else if(e.key==='Escape'){
+        e.preventDefault();
+        finishEdit(false);
+      }
+    });
+    this.inputEl.addEventListener('blur',()=>finishEdit(true));
+  }
+  _parseTypedValue(text){
+    if(this.parser){
+      const parsed=this.parser(text, this.value);
+      if(Number.isFinite(parsed)) return parsed;
+    }
+    const t=(text||'').trim();
+    if(!t) return null;
+    const match=t.match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/);
+    if(!match) return null;
+    let num=Number(match[0]);
+    if(!Number.isFinite(num)) return null;
+    if(t.includes('%')) num/=100;
+    return num;
   }
   _render(){
     const f=this._toFrac(this.value);
     const ang=-135+270*f;
     this.arcEl.setAttribute('d', f>0.001?arcPath(this._cx,this._cy,this._r,-135,ang):'');
     this.ptrEl.setAttribute('transform',`rotate(${ang} ${this._cx} ${this._cy})`);
-    this.valEl.textContent = this.formatter ? this.formatter(this.value) : (Math.abs(this.value)<10?this.value.toFixed(2):Math.round(this.value)) + this.unit;
+    const displayText = this.formatter ? this.formatter(this.value) : (Math.abs(this.value)<10?this.value.toFixed(2):Math.round(this.value)) + this.unit;
+    this.valEl.textContent = displayText;
+    if(!this.editing) this.inputEl.value=displayText;
   }
   set(v,silent){
     this.value=clamp(v,this.min,this.max);
@@ -1274,7 +1345,18 @@ function buildFxPage(){
     else { sec=v; }
     dl.setTime(sec);
   };
-  const delayTimeKnob = mk(dlGrid,{label:'TIME',min:0.02,max:8,value:0.35,default:0.35,log:true,formatter:v=>delayModeState.mode==='frequency'?`${v.toFixed(2)}Hz`:delayModeState.mode==='measures'?`${v.toFixed(2)} bars`:`${(v*1000).toFixed(0)}ms`,onChange:v=>{ delayModeState.value=v; setDelayFromMode(); }});
+  const delayTimeKnob = mk(dlGrid,{label:'TIME',min:0.02,max:8,value:0.35,default:0.35,log:true,
+    formatter:v=>delayModeState.mode==='frequency'?`${v.toFixed(2)}Hz`:delayModeState.mode==='measures'?`${v.toFixed(2)} bars`:`${(v*1000).toFixed(0)}ms`,
+    parser:text=>{
+      const t=(text||'').trim();
+      const match=t.match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/);
+      if(!match) return null;
+      const n=Number(match[0]);
+      if(!Number.isFinite(n)) return null;
+      if(delayModeState.mode==='seconds' && /ms/i.test(t)) return n/1000;
+      return n;
+    },
+    onChange:v=>{ delayModeState.value=v; setDelayFromMode(); }});
   const delayModeWrap=document.createElement('div');
   delayModeWrap.className='toggle-row';
   ['seconds','frequency','measures'].forEach(mode=>{
