@@ -88,6 +88,16 @@
   #midiDot.on{background:var(--teal);box-shadow:0 0 6px rgba(111,174,149,.8);}
   #midiSelect{background:var(--bg2);color:var(--text-dim);border:1px solid var(--line);border-radius:4px;font-family:var(--mono);font-size:11px;padding:4px 6px;max-width:150px;}
 
+  .record-control{
+    display:flex;align-items:center;gap:8px;padding:6px 10px;
+    background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+    font-family:var(--mono);font-size:11px;color:var(--text-dim);
+  }
+  .record-control input{accent-color:var(--amber);}
+  .record-state{color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;}
+  .record-state.armed{color:var(--amber-hi);}
+  .record-state.live{color:#ffd7d2;text-shadow:0 0 8px rgba(193,88,74,.45);}
+
   .audio-gate{
     position:fixed;inset:0;background:rgba(10,9,7,.92);z-index:200;
     display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;
@@ -287,6 +297,12 @@
       <span id="midiText">MIDI: checking…</span>
       <select id="midiSelect"><option value="all">All inputs</option></select>
     </div>
+
+    <label class="record-control" for="recordEnable">
+      <input type="checkbox" id="recordEnable" />
+      <span>Record to WAV</span>
+      <span class="record-state" id="recordState">Off</span>
+    </label>
   </header>
 
   <main id="synthView" class="active">
@@ -577,6 +593,129 @@ const Engine = {
         setMix:(m)=>wet.gain.setTargetAtTime(m,ctx.currentTime,0.02),
         setReturn:(g)=>out.gain.setTargetAtTime(g,ctx.currentTime,0.02)};
     })();
+  }
+};
+
+const Recorder = {
+  enabled:false,
+  isRecording:false,
+  processor:null,
+  muteTap:null,
+  leftChunks:[],
+  rightChunks:[],
+  sampleRate:44100,
+  init(){
+    if(this.processor || !Engine.ctx || !Engine.limiter) return;
+    const ctx=Engine.ctx;
+    this.sampleRate=ctx.sampleRate;
+    this.processor=ctx.createScriptProcessor(4096, 2, 2);
+    this.muteTap=ctx.createGain();
+    this.muteTap.gain.value=0;
+    this.processor.onaudioprocess=(event)=>{
+      if(!this.isRecording) return;
+      const input=event.inputBuffer;
+      const left=input.getChannelData(0);
+      const right=input.numberOfChannels>1 ? input.getChannelData(1) : left;
+      this.leftChunks.push(new Float32Array(left));
+      this.rightChunks.push(new Float32Array(right));
+    };
+    Engine.limiter.connect(this.processor);
+    this.processor.connect(this.muteTap).connect(ctx.destination);
+  },
+  setEnabled(enabled){
+    this.enabled=enabled;
+    if(enabled) this.init();
+    if(!enabled && this.isRecording) this.stop();
+    this._paint();
+  },
+  toggle(){
+    if(!this.enabled) return;
+    if(this.isRecording) this.stop();
+    else this.start();
+  },
+  start(){
+    if(!this.enabled || this.isRecording) return;
+    this.init();
+    this.sampleRate=Engine.ctx ? Engine.ctx.sampleRate : this.sampleRate;
+    this.leftChunks=[];
+    this.rightChunks=[];
+    this.isRecording=true;
+    this._paint();
+  },
+  stop(){
+    if(!this.isRecording) return;
+    this.isRecording=false;
+    this._paint();
+    const blob=this._buildWavBlob();
+    if(!blob) return;
+    const stamp=new Date().toISOString().replace(/[:.]/g, '-');
+    const link=document.createElement('a');
+    const url=URL.createObjectURL(blob);
+    link.href=url;
+    link.download=`strata-${stamp}.wav`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  },
+  _paint(){
+    const stateEl=document.getElementById('recordState');
+    const inputEl=document.getElementById('recordEnable');
+    if(!stateEl || !inputEl) return;
+    inputEl.checked=this.enabled;
+    stateEl.classList.remove('armed','live');
+    if(this.isRecording){
+      stateEl.textContent='Recording';
+      stateEl.classList.add('live');
+      return;
+    }
+    if(this.enabled){
+      stateEl.textContent='Armed · Space';
+      stateEl.classList.add('armed');
+      return;
+    }
+    stateEl.textContent='Off';
+  },
+  _buildWavBlob(){
+    if(!this.leftChunks.length) return null;
+    const frameCount=this.leftChunks.reduce((total, chunk)=>total+chunk.length, 0);
+    const interleaved=new Int16Array(frameCount*2);
+    let offset=0;
+    for(let idx=0; idx<this.leftChunks.length; idx++){
+      const left=this.leftChunks[idx];
+      const right=this.rightChunks[idx] || left;
+      for(let sampleIndex=0; sampleIndex<left.length; sampleIndex++){
+        interleaved[offset++]=this._floatToPcm(left[sampleIndex]);
+        interleaved[offset++]=this._floatToPcm(right[sampleIndex]);
+      }
+    }
+    const wavBuffer=new ArrayBuffer(44 + interleaved.byteLength);
+    const view=new DataView(wavBuffer);
+    this._writeAscii(view, 0, 'RIFF');
+    view.setUint32(4, 36 + interleaved.byteLength, true);
+    this._writeAscii(view, 8, 'WAVE');
+    this._writeAscii(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 2, true);
+    view.setUint32(24, this.sampleRate, true);
+    view.setUint32(28, this.sampleRate * 4, true);
+    view.setUint16(32, 4, true);
+    view.setUint16(34, 16, true);
+    this._writeAscii(view, 36, 'data');
+    view.setUint32(40, interleaved.byteLength, true);
+    let writeOffset=44;
+    for(let idx=0; idx<interleaved.length; idx++, writeOffset+=2){
+      view.setInt16(writeOffset, interleaved[idx], true);
+    }
+    return new Blob([view], {type:'audio/wav'});
+  },
+  _floatToPcm(value){
+    const sample=clamp(value, -1, 1);
+    return sample < 0 ? Math.round(sample * 0x8000) : Math.round(sample * 0x7fff);
+  },
+  _writeAscii(view, offset, text){
+    for(let idx=0; idx<text.length; idx++) view.setUint8(offset + idx, text.charCodeAt(idx));
   }
 };
 
@@ -1230,8 +1369,18 @@ window.addEventListener('resize', buildKeyboard);
 /* computer-keyboard playing */
 const KEY_MAP={'a':0,'w':1,'s':2,'e':3,'d':4,'f':5,'t':6,'g':7,'y':8,'h':9,'u':10,'j':11,'k':12,'o':13,'l':14,'p':15};
 const heldKeys=new Set();
+function isTypingTarget(target){
+  if(!target || !(target instanceof Element)) return false;
+  return !!target.closest('input, select, textarea, button, [contenteditable="true"]');
+}
 window.addEventListener('keydown',(e)=>{
   if(e.repeat) return;
+  if(e.code==='Space' && Recorder.enabled && !isTypingTarget(e.target)){
+    e.preventDefault();
+    Engine.resume();
+    Recorder.toggle();
+    return;
+  }
   const k=e.key.toLowerCase();
   if(k==='z'){ octaveBase=clamp(octaveBase-12,12,96); buildKeyboard(); return; }
   if(k==='x'){ octaveBase=clamp(octaveBase+12,12,96); buildKeyboard(); return; }
@@ -1321,9 +1470,13 @@ document.getElementById('tabFx').addEventListener('click',()=>{
   document.getElementById('synthView').classList.remove('active');
 });
 document.getElementById('addVoiceBtn').addEventListener('click',()=>{ addVoice(); });
+document.getElementById('recordEnable').addEventListener('change',(e)=>{
+  Recorder.setEnabled(e.target.checked);
+});
 
 function boot(){
   Engine.init();
+  Recorder.init();
   buildFxPage();
   mountGlobalKnobs();
   buildKeyboard();
