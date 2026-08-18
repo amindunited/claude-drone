@@ -98,6 +98,17 @@
   .record-state.armed{color:var(--amber-hi);}
   .record-state.live{color:#ffd7d2;text-shadow:0 0 8px rgba(193,88,74,.45);}
 
+  .settings-control{
+    display:flex;align-items:center;gap:6px;padding:6px;
+    background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+  }
+  .settings-control button{
+    background:var(--panel3);border:1px solid var(--line);color:var(--text-dim);
+    border-radius:4px;padding:6px 10px;font-family:var(--mono);font-size:10px;
+    text-transform:uppercase;letter-spacing:.06em;
+  }
+  .settings-control button:hover{color:var(--amber-hi);border-color:var(--amber-dim);}
+
   .audio-gate{
     position:fixed;inset:0;background:rgba(10,9,7,.92);z-index:200;
     display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;
@@ -311,6 +322,12 @@
       <span>Record to WAV</span>
       <span class="record-state" id="recordState">Off</span>
     </label>
+
+    <div class="settings-control">
+      <button id="saveSettingsBtn" type="button">Save JSON</button>
+      <button id="loadSettingsBtn" type="button">Load JSON</button>
+      <input id="loadSettingsInput" type="file" accept="application/json,.json" hidden />
+    </div>
   </header>
 
   <main id="synthView" class="active">
@@ -816,6 +833,106 @@ const LFO_DIVISIONS = [
   {label:'4 bars', beats:16}, {label:'8 bars', beats:32},
 ];
 
+function cloneData(value){
+  return JSON.parse(JSON.stringify(value));
+}
+function toNumber(value, fallback){
+  const next=Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
+const DEFAULT_VOICE_PARAMS = {
+  osc:'sine', pulseWidth:0.5, pitch:0,
+  attack:0.6, decay:0.4, sustain:0.75, release:1.2,
+  filterType:'lowpass', cutoff:2200, resonance:1.0, envDepth:0,
+  lfoTarget:'none', lfoRateMode:'hz', lfoRateHz:2, lfoRateDivision:4, lfoDepth:0.3,
+  lfo2Target:'none', lfo2RateMode:'hz', lfo2RateHz:0.5, lfo2RateDivision:4, lfo2Depth:0,
+  level:0.7, sends:{distortion:0,chorus:0,delay:0,reverb:0},
+};
+
+const DEFAULT_SYNTH_SETTINGS = {
+  global:{bpm:60, master:0.8, octaveBase:48},
+  fx:{
+    distortion:{drive:1, amount:0.3, tone:6000, return:0.5},
+    chorus:{rate:0.6, depth:4, mix:0.5, return:0.5},
+    delay:{mode:'frequency', timeValue:0.35, feedback:0.35, damp:4000, mix:0.6, return:0.4},
+    reverb:{size:2.5, damping:2.2, mix:0.5, return:0.45},
+  },
+  voices:[
+    {
+      name:'Sub Drone',
+      enabled:true,
+      params:{
+        osc:'sine', attack:1.2, decay:0.8, sustain:0.85, release:2.5,
+        filterType:'lowpass', cutoff:900, resonance:0.7, envDepth:0,
+        lfoTarget:'none', level:0.75, sends:{distortion:0,chorus:0.1,delay:0,reverb:0.35},
+      },
+    },
+    {
+      name:'Shimmer',
+      enabled:true,
+      params:{
+        osc:'sawtooth', attack:2.0, decay:1.0, sustain:0.6, release:3.5,
+        filterType:'lowpass', cutoff:3200, resonance:2.0, envDepth:800,
+        lfoTarget:'filter', lfoRateMode:'sync', lfoRateDivision:8, lfoDepth:0.35,
+        level:0.4, sends:{distortion:0,chorus:0.4,delay:0.25,reverb:0.5},
+      },
+    },
+  ],
+};
+
+const AppState = {
+  global:cloneData(DEFAULT_SYNTH_SETTINGS.global),
+  fx:cloneData(DEFAULT_SYNTH_SETTINGS.fx),
+};
+
+const SettingsUI = {
+  global:{bpm:null, master:null},
+  fx:{distortion:{}, chorus:{}, delay:{}, reverb:{}},
+};
+
+function normalizeVoiceSettings(voice, index){
+  const source=voice && typeof voice==='object' ? voice : {};
+  const sourceParams=source.params && typeof source.params==='object' ? source.params : source;
+  const params=Object.assign({}, DEFAULT_VOICE_PARAMS, sourceParams);
+  params.sends=Object.assign({}, DEFAULT_VOICE_PARAMS.sends, sourceParams.sends || {});
+  return {
+    name: typeof source.name==='string' && source.name.trim() ? source.name.trim() : `Voice ${index+1}`,
+    enabled: source.enabled !== undefined ? !!source.enabled : true,
+    params,
+  };
+}
+
+function normalizeSettings(raw){
+  if(!raw || typeof raw!=='object') throw new Error('Invalid settings file.');
+  const globalSource=raw.global && typeof raw.global==='object' ? raw.global : {};
+  const fxSource=raw.fx && typeof raw.fx==='object' ? raw.fx : {};
+  const voicesSource=Array.isArray(raw.voices) && raw.voices.length ? raw.voices : DEFAULT_SYNTH_SETTINGS.voices;
+  const delayMode=['seconds','frequency','measures'].includes(fxSource.delay && fxSource.delay.mode)
+    ? fxSource.delay.mode
+    : DEFAULT_SYNTH_SETTINGS.fx.delay.mode;
+  return {
+    global:{
+      bpm:clamp(Math.round(toNumber(globalSource.bpm, DEFAULT_SYNTH_SETTINGS.global.bpm)), 20, 220),
+      master:clamp(toNumber(globalSource.master, DEFAULT_SYNTH_SETTINGS.global.master), 0, 1.2),
+      octaveBase:clamp(Math.round(toNumber(globalSource.octaveBase, DEFAULT_SYNTH_SETTINGS.global.octaveBase)), 12, 96),
+    },
+    fx:{
+      distortion:Object.assign({}, DEFAULT_SYNTH_SETTINGS.fx.distortion, fxSource.distortion || {}),
+      chorus:Object.assign({}, DEFAULT_SYNTH_SETTINGS.fx.chorus, fxSource.chorus || {}),
+      delay:Object.assign({}, DEFAULT_SYNTH_SETTINGS.fx.delay, fxSource.delay || {}, {mode:delayMode}),
+      reverb:Object.assign({}, DEFAULT_SYNTH_SETTINGS.fx.reverb, fxSource.reverb || {}),
+    },
+    voices:voicesSource.map(normalizeVoiceSettings),
+  };
+}
+
+function delayModeDefaultValue(mode){
+  if(mode==='seconds') return 0.35;
+  if(mode==='measures') return 1;
+  return 0.35;
+}
+
 /* ============================================================
    NOTE VOICE  (one sounding note within a Voice)
    ============================================================ */
@@ -979,19 +1096,13 @@ const FX_KEYS=['distortion','chorus','delay','reverb'];
 const FX_LABELS={distortion:'Dist',chorus:'Chor',delay:'Dly',reverb:'Verb'};
 
 class Voice{
-  constructor(name, preset){
+  constructor(name, preset, enabled){
     this.id=nextId();
     this.name=name;
-    this.enabled=true;
+    this.enabled=enabled !== undefined ? !!enabled : true;
     this.activeNotes=new Map();
-    this.params=Object.assign({
-      osc:'sine', pulseWidth:0.5, pitch:0,
-      attack:0.6, decay:0.4, sustain:0.75, release:1.2,
-      filterType:'lowpass', cutoff:2200, resonance:1.0, envDepth:0,
-      lfoTarget:'none', lfoRateMode:'hz', lfoRateHz:2, lfoRateDivision:4, lfoDepth:0.3,
-      lfo2Target:'none', lfo2RateMode:'hz', lfo2RateHz:0.5, lfo2RateDivision:4, lfo2Depth:0,
-      level:0.7, sends:{distortion:0,chorus:0,delay:0,reverb:0},
-    }, preset||{});
+    this.params=Object.assign({}, DEFAULT_VOICE_PARAMS, preset || {});
+    this.params.sends=Object.assign({}, DEFAULT_VOICE_PARAMS.sends, this.params.sends || {});
 
     const ctx=Engine.ctx;
     this.bus=ctx.createGain(); this.bus.gain.value=1;
@@ -1030,13 +1141,27 @@ class Voice{
   _liveUpdate(){
     this.activeNotes.forEach(nv=>nv.updateLive(this.params));
   }
+  setEnabled(enabled){
+    this.enabled=!!enabled;
+    if(!this.enabled) this.allNotesOff();
+    this._paintEnabled();
+  }
   setLevel(v){ this.params.level=v; this.levelGain.gain.setTargetAtTime(v, Engine.ctx.currentTime, 0.02); }
   setSend(k,v){ this.params.sends[k]=v; this.sendGains[k].gain.setTargetAtTime(v, Engine.ctx.currentTime, 0.02); }
+  serialize(){
+    return {name:this.name, enabled:this.enabled, params:cloneData(this.params)};
+  }
 
   dispose(){
     this.allNotesOff();
     [this.bus,this.levelGain,...Object.values(this.sendGains)].forEach(n=>{ try{n.disconnect();}catch(e){} });
     if(this.panelEl) this.panelEl.remove();
+  }
+
+  _paintEnabled(){
+    if(!this.enableBtn) return;
+    this.enableBtn.classList.toggle('on',this.enabled);
+    this.enableBtn.classList.toggle('off',!this.enabled);
   }
 
   _buildPanel(){
@@ -1213,12 +1338,8 @@ class Voice{
       removeVoice(this.id);
     });
     const enableBtn=panel.querySelector('[data-act="enable"]');
-    enableBtn.addEventListener('click',()=>{
-      this.enabled=!this.enabled;
-      enableBtn.classList.toggle('on',this.enabled);
-      enableBtn.classList.toggle('off',!this.enabled);
-      if(!this.enabled) this.allNotesOff();
-    });
+    this.enableBtn=enableBtn;
+    enableBtn.addEventListener('click',()=>{ this.setEnabled(!this.enabled); });
     panel.querySelector('.vp-name').addEventListener('input',e=>{ this.name=e.target.value; });
 
     /* knobs */
@@ -1266,6 +1387,8 @@ class Voice{
       this._mk(sends,{label:FX_LABELS[k],min:0,max:1,value:p.sends[k],default:0,step:0.01,size:40,
         formatter:v=>Math.round(v*100)+'%', onChange:v=>this.setSend(k,v)});
     });
+
+    this._paintEnabled();
   }
   _mk(container,opts){
     const k=new Knob(opts);
@@ -1290,10 +1413,24 @@ class Voice{
    VOICES MANAGEMENT
    ============================================================ */
 let voices=[];
-function addVoice(name, preset){
-  const v=new Voice(name||('Voice '+(voices.length+1)), preset);
+function addVoice(nameOrConfig, preset){
+  let name=nameOrConfig;
+  let params=preset;
+  let enabled=true;
+  if(nameOrConfig && typeof nameOrConfig==='object'){
+    name=nameOrConfig.name || ('Voice '+(voices.length+1));
+    params=nameOrConfig.params && typeof nameOrConfig.params==='object' ? nameOrConfig.params : nameOrConfig;
+    enabled=nameOrConfig.enabled !== undefined ? !!nameOrConfig.enabled : true;
+  }
+  const v=new Voice(name||('Voice '+(voices.length+1)), params, enabled);
   voices.push(v);
   return v;
+}
+function clearVoices(){
+  while(voices.length){
+    const voice=voices.pop();
+    voice.dispose();
+  }
 }
 function removeVoice(id){
   const idx=voices.findIndex(v=>v.id===id);
@@ -1301,8 +1438,85 @@ function removeVoice(id){
   voices[idx].dispose();
   voices.splice(idx,1);
 }
+function replaceVoices(nextVoices){
+  clearVoices();
+  nextVoices.forEach((voice,index)=>addVoice(normalizeVoiceSettings(voice, index)));
+}
 function globalNoteOn(note,vel){ voices.forEach(v=>v.noteOn(note,vel)); }
 function globalNoteOff(note){ voices.forEach(v=>v.noteOff(note)); }
+
+function snapshotSettings(){
+  return {
+    version:1,
+    global:cloneData(AppState.global),
+    fx:cloneData(AppState.fx),
+    voices:voices.map(voice=>voice.serialize()),
+  };
+}
+
+function applyGlobalSettings(){
+  const state=AppState.global;
+  if(SettingsUI.global.bpm) SettingsUI.global.bpm.set(state.bpm, true);
+  if(SettingsUI.global.master) SettingsUI.global.master.set(state.master, true);
+  if(Engine.ctx) Engine.setBpm(state.bpm);
+  if(Engine.master) Engine.master.gain.setTargetAtTime(state.master, Engine.ctx.currentTime, 0.02);
+  octaveBase=state.octaveBase;
+  buildKeyboard();
+}
+
+function applyFxSettings(){
+  if(!Engine.ctx) return;
+
+  const distState=AppState.fx.distortion;
+  if(SettingsUI.fx.distortion.drive) SettingsUI.fx.distortion.drive.set(distState.drive, true);
+  if(SettingsUI.fx.distortion.amount) SettingsUI.fx.distortion.amount.set(distState.amount, true);
+  if(SettingsUI.fx.distortion.tone) SettingsUI.fx.distortion.tone.set(distState.tone, true);
+  if(SettingsUI.fx.distortion.return) SettingsUI.fx.distortion.return.set(distState.return, true);
+  Engine.fx.distortion.setDrive(distState.drive);
+  Engine.fx.distortion.setAmount(distState.amount);
+  Engine.fx.distortion.setTone(distState.tone);
+  Engine.fx.distortion.setReturn(distState.return);
+
+  const chorusState=AppState.fx.chorus;
+  if(SettingsUI.fx.chorus.rate) SettingsUI.fx.chorus.rate.set(chorusState.rate, true);
+  if(SettingsUI.fx.chorus.depth) SettingsUI.fx.chorus.depth.set(chorusState.depth, true);
+  if(SettingsUI.fx.chorus.mix) SettingsUI.fx.chorus.mix.set(chorusState.mix, true);
+  if(SettingsUI.fx.chorus.return) SettingsUI.fx.chorus.return.set(chorusState.return, true);
+  Engine.fx.chorus.setRate(chorusState.rate);
+  Engine.fx.chorus.setDepth(chorusState.depth);
+  Engine.fx.chorus.setMix(chorusState.mix);
+  Engine.fx.chorus.setReturn(chorusState.return);
+
+  const delayState=AppState.fx.delay;
+  if(SettingsUI.fx.delay.setMode) SettingsUI.fx.delay.setMode(delayState.mode, delayState.timeValue);
+  if(SettingsUI.fx.delay.feedback) SettingsUI.fx.delay.feedback.set(delayState.feedback, true);
+  if(SettingsUI.fx.delay.damp) SettingsUI.fx.delay.damp.set(delayState.damp, true);
+  if(SettingsUI.fx.delay.mix) SettingsUI.fx.delay.mix.set(delayState.mix, true);
+  if(SettingsUI.fx.delay.return) SettingsUI.fx.delay.return.set(delayState.return, true);
+  Engine.fx.delay.setFeedback(delayState.feedback);
+  Engine.fx.delay.setDamp(delayState.damp);
+  Engine.fx.delay.setMix(delayState.mix);
+  Engine.fx.delay.setReturn(delayState.return);
+
+  const reverbState=AppState.fx.reverb;
+  if(SettingsUI.fx.reverb.size) SettingsUI.fx.reverb.size.set(reverbState.size, true);
+  if(SettingsUI.fx.reverb.damping) SettingsUI.fx.reverb.damping.set(reverbState.damping, true);
+  if(SettingsUI.fx.reverb.mix) SettingsUI.fx.reverb.mix.set(reverbState.mix, true);
+  if(SettingsUI.fx.reverb.return) SettingsUI.fx.reverb.return.set(reverbState.return, true);
+  Engine.fx.reverb.setSize(reverbState.size);
+  Engine.fx.reverb.setDamp(reverbState.damping);
+  Engine.fx.reverb.setMix(reverbState.mix);
+  Engine.fx.reverb.setReturn(reverbState.return);
+}
+
+function loadSettings(raw){
+  const next=normalizeSettings(raw);
+  AppState.global=cloneData(next.global);
+  AppState.fx=cloneData(next.fx);
+  applyGlobalSettings();
+  applyFxSettings();
+  replaceVoices(next.voices);
+}
 
 /* ============================================================
    FX PAGE
@@ -1321,44 +1535,61 @@ function buildFxPage(){
   function mk(container,opts){ const k=new Knob(opts); container.appendChild(k.el); return k; }
 
   const d=Engine.fx.distortion;
+  const distState=AppState.fx.distortion;
   const dGrid=panel('Distortion','SEND 1');
-  mk(dGrid,{label:'DRIVE',min:0,max:4,value:1,default:1,step:0.01,formatter:v=>v.toFixed(2)+'x',onChange:v=>d.setDrive(v)});
-  mk(dGrid,{label:'AMOUNT',min:0,max:1,value:0.3,default:0.3,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>d.setAmount(v)});
-  mk(dGrid,{label:'TONE',min:400,max:12000,value:6000,default:6000,log:true,formatter:v=>Math.round(v)+'Hz',onChange:v=>d.setTone(v)});
-  mk(dGrid,{label:'RETURN',min:0,max:1.5,value:0.5,default:0.5,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>d.setReturn(v)});
+  SettingsUI.fx.distortion.drive=mk(dGrid,{label:'DRIVE',min:0,max:4,value:distState.drive,default:1,step:0.01,formatter:v=>v.toFixed(2)+'x',onChange:v=>{ distState.drive=v; d.setDrive(v); }});
+  SettingsUI.fx.distortion.amount=mk(dGrid,{label:'AMOUNT',min:0,max:1,value:distState.amount,default:0.3,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ distState.amount=v; d.setAmount(v); }});
+  SettingsUI.fx.distortion.tone=mk(dGrid,{label:'TONE',min:400,max:12000,value:distState.tone,default:6000,log:true,formatter:v=>Math.round(v)+'Hz',onChange:v=>{ distState.tone=v; d.setTone(v); }});
+  SettingsUI.fx.distortion.return=mk(dGrid,{label:'RETURN',min:0,max:1.5,value:distState.return,default:0.5,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ distState.return=v; d.setReturn(v); }});
 
   const c=Engine.fx.chorus;
+  const chorusState=AppState.fx.chorus;
   const cGrid=panel('Chorus','SEND 2');
-  mk(cGrid,{label:'RATE',min:0.05,max:5,value:0.6,default:0.6,log:true,formatter:v=>v.toFixed(2)+'Hz',onChange:v=>c.setRate(v)});
-  mk(cGrid,{label:'DEPTH',min:0.5,max:12,value:4,default:4,formatter:v=>v.toFixed(1)+'ms',onChange:v=>c.setDepth(v)});
-  mk(cGrid,{label:'MIX',min:0,max:1,value:0.5,default:0.5,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>c.setMix(v)});
-  mk(cGrid,{label:'RETURN',min:0,max:1.5,value:0.5,default:0.5,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>c.setReturn(v)});
+  SettingsUI.fx.chorus.rate=mk(cGrid,{label:'RATE',min:0.05,max:5,value:chorusState.rate,default:0.6,log:true,formatter:v=>v.toFixed(2)+'Hz',onChange:v=>{ chorusState.rate=v; c.setRate(v); }});
+  SettingsUI.fx.chorus.depth=mk(cGrid,{label:'DEPTH',min:0.5,max:12,value:chorusState.depth,default:4,formatter:v=>v.toFixed(1)+'ms',onChange:v=>{ chorusState.depth=v; c.setDepth(v); }});
+  SettingsUI.fx.chorus.mix=mk(cGrid,{label:'MIX',min:0,max:1,value:chorusState.mix,default:0.5,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ chorusState.mix=v; c.setMix(v); }});
+  SettingsUI.fx.chorus.return=mk(cGrid,{label:'RETURN',min:0,max:1.5,value:chorusState.return,default:0.5,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ chorusState.return=v; c.setReturn(v); }});
 
   const dl=Engine.fx.delay;
   const dlGrid=panel('Delay','SEND 3');
-  const delayModeState={mode:'frequency', value:0.35};
+  const delayState=AppState.fx.delay;
   const setDelayFromMode=()=>{
-    const v=delayModeState.value;
+    const v=delayState.timeValue;
     let sec=0.35;
-    if(delayModeState.mode==='frequency'){ sec = 1 / Math.max(v,0.001); }
-    else if(delayModeState.mode==='measures'){ sec = (v * 60) / Math.max(Engine.bpm,1); }
+    if(delayState.mode==='frequency'){ sec = 1 / Math.max(v,0.001); }
+    else if(delayState.mode==='measures'){ sec = (v * 60) / Math.max(Engine.bpm,1); }
     else { sec=v; }
     dl.setTime(sec);
   };
-  const delayTimeKnob = mk(dlGrid,{label:'TIME',min:0.02,max:8,value:0.35,default:0.35,log:true,
-    formatter:v=>delayModeState.mode==='frequency'?`${v.toFixed(2)}Hz`:delayModeState.mode==='measures'?`${v.toFixed(2)} bars`:`${(v*1000).toFixed(0)}ms`,
+  const delayTimeKnob = mk(dlGrid,{label:'TIME',min:0.02,max:8,value:delayState.timeValue,default:0.35,log:true,
+    formatter:v=>delayState.mode==='frequency'?`${v.toFixed(2)}Hz`:delayState.mode==='measures'?`${v.toFixed(2)} bars`:`${(v*1000).toFixed(0)}ms`,
     parser:text=>{
       const t=(text||'').trim();
       const match=t.match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/);
       if(!match) return null;
       const n=Number(match[0]);
       if(!Number.isFinite(n)) return null;
-      if(delayModeState.mode==='seconds' && /ms/i.test(t)) return n/1000;
+      if(delayState.mode==='seconds' && /ms/i.test(t)) return n/1000;
       return n;
     },
-    onChange:v=>{ delayModeState.value=v; setDelayFromMode(); }});
+    onChange:v=>{ delayState.timeValue=v; setDelayFromMode(); }});
   const delayModeWrap=document.createElement('div');
   delayModeWrap.className='toggle-row';
+  const paintDelayMode=()=>{
+    delayModeWrap.querySelectorAll('.toggle-pill').forEach(b=>b.classList.toggle('active', b.dataset.delayMode===delayState.mode));
+  };
+  const setDelayMode=(mode, nextValue)=>{
+    const resolvedMode=['seconds','frequency','measures'].includes(mode) ? mode : DEFAULT_SYNTH_SETTINGS.fx.delay.mode;
+    delayState.mode=resolvedMode;
+    delayTimeKnob.min = resolvedMode==='seconds' ? 0.02 : resolvedMode==='frequency' ? 0.05 : 0.25;
+    delayTimeKnob.max = resolvedMode==='seconds' ? 2 : resolvedMode==='frequency' ? 8 : 16;
+    const fallbackValue=delayModeDefaultValue(resolvedMode);
+    const resolvedValue=Number.isFinite(Number(nextValue)) ? Number(nextValue) : fallbackValue;
+    delayTimeKnob.set(clamp(resolvedValue, delayTimeKnob.min, delayTimeKnob.max), true);
+    delayState.timeValue=delayTimeKnob.value;
+    setDelayFromMode();
+    paintDelayMode();
+  };
   ['seconds','frequency','measures'].forEach(mode=>{
     const btn=document.createElement('button');
     btn.type='button';
@@ -1366,31 +1597,27 @@ function buildFxPage(){
     btn.textContent=mode==='seconds'?'Sec':mode==='frequency'?'Hz':'Bars';
     btn.dataset.delayMode=mode;
     btn.addEventListener('click',()=>{
-      delayModeState.mode=mode;
-      delayTimeKnob.min = mode==='seconds'?0.02:mode==='frequency'?0.05:0.25;
-      delayTimeKnob.max = mode==='seconds'?2:mode==='frequency'?8:16;
-      delayTimeKnob.value = mode==='seconds'?0.35:mode==='frequency'?0.35:1;
-      delayModeState.value = delayTimeKnob.value;
-      delayTimeKnob._render();
-      setDelayFromMode();
-      delayModeWrap.querySelectorAll('.toggle-pill').forEach(b=>b.classList.toggle('active', b.dataset.delayMode===mode));
+      const nextValue = mode===delayState.mode ? delayState.timeValue : delayModeDefaultValue(mode);
+      setDelayMode(mode, nextValue);
     });
     delayModeWrap.appendChild(btn);
   });
   dlGrid.insertBefore(delayModeWrap, dlGrid.firstChild);
-  delayModeWrap.querySelectorAll('.toggle-pill').forEach(b=>b.classList.toggle('active', b.dataset.delayMode===delayModeState.mode));
-  setDelayFromMode();
-  mk(dlGrid,{label:'FEEDBACK',min:0,max:0.95,value:0.35,default:0.35,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>dl.setFeedback(v)});
-  mk(dlGrid,{label:'DAMP',min:400,max:12000,value:4000,default:4000,log:true,formatter:v=>Math.round(v)+'Hz',onChange:v=>dl.setDamp(v)});
-  mk(dlGrid,{label:'MIX',min:0,max:1,value:0.6,default:0.6,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>dl.setMix(v)});
-  mk(dlGrid,{label:'RETURN',min:0,max:1.5,value:0.4,default:0.4,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>dl.setReturn(v)});
+  SettingsUI.fx.delay.time=delayTimeKnob;
+  SettingsUI.fx.delay.setMode=setDelayMode;
+  SettingsUI.fx.delay.feedback=mk(dlGrid,{label:'FEEDBACK',min:0,max:0.95,value:delayState.feedback,default:0.35,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ delayState.feedback=v; dl.setFeedback(v); }});
+  SettingsUI.fx.delay.damp=mk(dlGrid,{label:'DAMP',min:400,max:12000,value:delayState.damp,default:4000,log:true,formatter:v=>Math.round(v)+'Hz',onChange:v=>{ delayState.damp=v; dl.setDamp(v); }});
+  SettingsUI.fx.delay.mix=mk(dlGrid,{label:'MIX',min:0,max:1,value:delayState.mix,default:0.6,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ delayState.mix=v; dl.setMix(v); }});
+  SettingsUI.fx.delay.return=mk(dlGrid,{label:'RETURN',min:0,max:1.5,value:delayState.return,default:0.4,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ delayState.return=v; dl.setReturn(v); }});
+  setDelayMode(delayState.mode, delayState.timeValue);
 
   const rv=Engine.fx.reverb;
+  const reverbState=AppState.fx.reverb;
   const rvGrid=panel('Reverb','SEND 4');
-  mk(rvGrid,{label:'SIZE',min:0.2,max:8,value:2.5,default:2.5,log:true,formatter:v=>v.toFixed(1)+'s',onChange:v=>rv.setSize(v)});
-  mk(rvGrid,{label:'DAMPING',min:0.5,max:6,value:2.2,default:2.2,step:0.05,formatter:v=>v.toFixed(2),onChange:v=>rv.setDamp(v)});
-  mk(rvGrid,{label:'MIX',min:0,max:1,value:0.5,default:0.5,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>rv.setMix(v)});
-  mk(rvGrid,{label:'RETURN',min:0,max:1.5,value:0.45,default:0.45,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>rv.setReturn(v)});
+  SettingsUI.fx.reverb.size=mk(rvGrid,{label:'SIZE',min:0.2,max:8,value:reverbState.size,default:2.5,log:true,formatter:v=>v.toFixed(1)+'s',onChange:v=>{ reverbState.size=v; rv.setSize(v); }});
+  SettingsUI.fx.reverb.damping=mk(rvGrid,{label:'DAMPING',min:0.5,max:6,value:reverbState.damping,default:2.2,step:0.05,formatter:v=>v.toFixed(2),onChange:v=>{ reverbState.damping=v; rv.setDamp(v); }});
+  SettingsUI.fx.reverb.mix=mk(rvGrid,{label:'MIX',min:0,max:1,value:reverbState.mix,default:0.5,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ reverbState.mix=v; rv.setMix(v); }});
+  SettingsUI.fx.reverb.return=mk(rvGrid,{label:'RETURN',min:0,max:1.5,value:reverbState.return,default:0.45,step:0.01,formatter:v=>Math.round(v*100)+'%',onChange:v=>{ reverbState.return=v; rv.setReturn(v); }});
 }
 
 /* ============================================================
@@ -1444,8 +1671,16 @@ function buildKeyboard(){
   });
   document.getElementById('octLabel').textContent='OCT '+(octaveBase/12 - 1);
 }
-document.getElementById('octUp').addEventListener('click',()=>{ octaveBase=clamp(octaveBase+12,12,96); buildKeyboard(); });
-document.getElementById('octDown').addEventListener('click',()=>{ octaveBase=clamp(octaveBase-12,12,96); buildKeyboard(); });
+document.getElementById('octUp').addEventListener('click',()=>{
+  octaveBase=clamp(octaveBase+12,12,96);
+  AppState.global.octaveBase=octaveBase;
+  buildKeyboard();
+});
+document.getElementById('octDown').addEventListener('click',()=>{
+  octaveBase=clamp(octaveBase-12,12,96);
+  AppState.global.octaveBase=octaveBase;
+  buildKeyboard();
+});
 window.addEventListener('resize', buildKeyboard);
 
 /* computer-keyboard playing */
@@ -1464,8 +1699,18 @@ window.addEventListener('keydown',(e)=>{
     return;
   }
   const k=e.key.toLowerCase();
-  if(k==='z'){ octaveBase=clamp(octaveBase-12,12,96); buildKeyboard(); return; }
-  if(k==='x'){ octaveBase=clamp(octaveBase+12,12,96); buildKeyboard(); return; }
+  if(k==='z'){
+    octaveBase=clamp(octaveBase-12,12,96);
+    AppState.global.octaveBase=octaveBase;
+    buildKeyboard();
+    return;
+  }
+  if(k==='x'){
+    octaveBase=clamp(octaveBase+12,12,96);
+    AppState.global.octaveBase=octaveBase;
+    buildKeyboard();
+    return;
+  }
   if(KEY_MAP.hasOwnProperty(k) && !heldKeys.has(k)){
     heldKeys.add(k);
     Engine.resume();
@@ -1529,14 +1774,45 @@ function setupMidi(){
    ============================================================ */
 function mountGlobalKnobs(){
   const bpmMount=document.getElementById('bpmKnobMount');
-  const bpmKnob=new Knob({min:20,max:220,value:60,default:60,step:1,size:40,label:'',
-    formatter:v=>Math.round(v), onChange:v=>Engine.setBpm(Math.round(v))});
+  const bpmKnob=new Knob({min:20,max:220,value:AppState.global.bpm,default:60,step:1,size:40,label:'',
+    formatter:v=>Math.round(v), onChange:v=>{
+      AppState.global.bpm=Math.round(v);
+      Engine.setBpm(AppState.global.bpm);
+    }});
   bpmMount.replaceWith(bpmKnob.el);
+  SettingsUI.global.bpm=bpmKnob;
 
   const masterMount=document.getElementById('masterKnobMount');
-  const masterKnob=new Knob({min:0,max:1.2,value:0.8,default:0.8,step:0.01,size:40,label:'',
-    formatter:v=>Math.round(v*100)+'%', onChange:v=>{ if(Engine.master) Engine.master.gain.setTargetAtTime(v,Engine.ctx.currentTime,0.02); }});
+  const masterKnob=new Knob({min:0,max:1.2,value:AppState.global.master,default:0.8,step:0.01,size:40,label:'',
+    formatter:v=>Math.round(v*100)+'%', onChange:v=>{
+      AppState.global.master=v;
+      if(Engine.master) Engine.master.gain.setTargetAtTime(v,Engine.ctx.currentTime,0.02);
+    }});
   masterMount.replaceWith(masterKnob.el);
+  SettingsUI.global.master=masterKnob;
+}
+
+function downloadSettings(){
+  const blob=new Blob([JSON.stringify(snapshotSettings(), null, 2)], {type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement('a');
+  const stamp=new Date().toISOString().replace(/[:.]/g, '-');
+  link.href=url;
+  link.download=`strata-settings-${stamp}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+async function handleSettingsFile(file){
+  if(!file) return;
+  try{
+    const raw=JSON.parse(await file.text());
+    loadSettings(raw);
+  } catch(error){
+    alert(error && error.message ? error.message : 'Could not load settings JSON.');
+  }
 }
 
 document.getElementById('tabSynth').addEventListener('click',()=>{
@@ -1555,21 +1831,26 @@ document.getElementById('addVoiceBtn').addEventListener('click',()=>{ addVoice()
 document.getElementById('recordEnable').addEventListener('change',(e)=>{
   Recorder.setEnabled(e.target.checked);
 });
+document.getElementById('saveSettingsBtn').addEventListener('click', downloadSettings);
+document.getElementById('loadSettingsBtn').addEventListener('click',()=>{
+  document.getElementById('loadSettingsInput').click();
+});
+document.getElementById('loadSettingsInput').addEventListener('change',async (e)=>{
+  const [file]=e.target.files || [];
+  await handleSettingsFile(file);
+  e.target.value='';
+});
 
+let booted=false;
 function boot(){
+  if(booted) return;
+  booted=true;
   Engine.init();
   Recorder.init();
   buildFxPage();
   mountGlobalKnobs();
-  buildKeyboard();
+  loadSettings(DEFAULT_SYNTH_SETTINGS);
   setupMidi();
-  addVoice('Sub Drone', {osc:'sine', attack:1.2, decay:0.8, sustain:0.85, release:2.5,
-    filterType:'lowpass', cutoff:900, resonance:0.7, envDepth:0,
-    lfoTarget:'none', level:0.75, sends:{distortion:0,chorus:0.1,delay:0,reverb:0.35}});
-  addVoice('Shimmer', {osc:'sawtooth', attack:2.0, decay:1.0, sustain:0.6, release:3.5,
-    filterType:'lowpass', cutoff:3200, resonance:2.0, envDepth:800,
-    lfoTarget:'filter', lfoRateMode:'sync', lfoRateDivision:8, lfoDepth:0.35,
-    level:0.4, sends:{distortion:0,chorus:0.4,delay:0.25,reverb:0.5}});
 }
 
 document.getElementById('startBtn').addEventListener('click',()=>{
