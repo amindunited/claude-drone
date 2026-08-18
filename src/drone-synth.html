@@ -1868,10 +1868,14 @@ function triggerGlobalNoteOff(note){
   if(count===0) activeNoteCounts.delete(note);
   else activeNoteCounts.set(note, count);
 
-  if(count>0) return;
+  if(count>0){
+    setNoteVisualActive(note, true);
+    return;
+  }
   if(sustainEnabled){
     sustainedNotes.add(note);
-    setNoteVisualActive(note, true);
+    activeVisual.delete(note);
+    setNoteVisualActive(note, false);
     return;
   }
 
