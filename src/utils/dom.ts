@@ -27,6 +27,18 @@ export function formatTime(value: number): string {
   return `${value.toFixed(2)} s`;
 }
 
+export function formatDelayTime(value: number, mode: 'seconds' | 'frequency' | 'measures' = 'seconds'): string {
+  switch (mode) {
+    case 'frequency':
+      return `${value.toFixed(2)} Hz`;
+    case 'measures':
+      return `${value.toFixed(2)} bars`;
+    case 'seconds':
+    default:
+      return `${value.toFixed(2)} s`;
+  }
+}
+
 export function disableButton(id: string): void {
   const button = document.getElementById(id) as HTMLButtonElement;
   if (button) {

@@ -2,11 +2,11 @@ import type { AudioNodes, LFONodes, LFOTarget } from './types/audio.js';
 import { createOscillators, configureOscillator, createMixer, connectOscillators } from './audio/oscillators.js';
 import { createFilter, updateFilterType, updateFilterCutoff, updateFilterResonance, connectFilter } from './audio/filter.js';
 import { createLFO, updateLFORate, updateLFOWaveform, updateLFODepth, connectLFOToTarget, startLFO, stopLFO } from './audio/lfo.js';
-import { createDelay, updateDelayTime, updateDelayFeedback, updateDelayMix, connectDelayNodes } from './audio/delay.js';
+import { createDelay, updateDelayTime, updateDelayFeedback, updateDelayMix, connectDelayNodes, type DelayTimeMode } from './audio/delay.js';
 import { createReverb, updateReverbBuffer, updateReverbMix, connectReverbNodes } from './audio/reverb.js';
 import { createDistortion, updateDistortionCurve, createMasterGain, updateMasterVolume } from './audio/effects.js';
 import { createVisualizer, createAnalyser, startVisualization, stopVisualization } from './audio/visualizer.js';
-import { getElementNumericValue, getElementValue, updateValueDisplay, formatFrequency, formatDecimal, formatTime, enableButton, disableButton, addEventListeners } from './utils/dom.js';
+import { getElementNumericValue, getElementValue, updateValueDisplay, formatFrequency, formatDecimal, formatTime, formatDelayTime, enableButton, disableButton, addEventListeners } from './utils/dom.js';
 
 export class DroneSynth {
   private readonly audioContext: AudioContext;
@@ -297,12 +297,18 @@ export class DroneSynth {
     });
 
     // Delay controls
-    document.getElementById('delayTime')?.addEventListener('input', (e) => {
-      const target = e.target as HTMLInputElement;
+    const updateDelayTimeControl = () => {
+      const target = document.getElementById('delayTime') as HTMLInputElement | null;
+      const mode = getElementValue('delayTimeMode') as DelayTimeMode;
+      if (!target) return;
+
       const value = parseFloat(target.value);
-      updateDelayTime(this.nodes.delay, value, this.audioContext);
-      updateValueDisplay('delayTimeValue', formatTime(value));
-    });
+      updateDelayTime(this.nodes.delay, value, this.audioContext, mode, 120);
+      updateValueDisplay('delayTimeValue', formatDelayTime(value, mode));
+    };
+
+    document.getElementById('delayTime')?.addEventListener('input', updateDelayTimeControl);
+    document.getElementById('delayTimeMode')?.addEventListener('change', updateDelayTimeControl);
 
     document.getElementById('delayFeedback')?.addEventListener('input', (e) => {
       const target = e.target as HTMLInputElement;
