@@ -1,6 +1,7 @@
 # Handoff: Extract `drone-synth.html` into its own package
 
-Status: **design agreed, not yet implemented.**
+Status: **implemented (tickets 001–003 done); ticket 004's live GH Pages
+verification still needs a push + post-merge check.**
 
 ## Goal
 
@@ -82,6 +83,46 @@ cleaning up the code along the way.
 
 ## Next step
 
-Implement per the decisions above, starting with `git mv src/drone-synth.html
-drone-synth/drone-synth.html` to preserve file history, then split into
-modules, then wire up the workspace + build/deploy path.
+Push this branch and let the real GH Pages workflow run once merged, then
+check the live deploy at `https://amindunited.github.io/claude-drone/` and
+`https://amindunited.github.io/claude-drone/drone-synth.html` (ticket 004's
+last remaining item — everything else in that ticket has been verified
+locally: clean `npm ci && npm run build` succeeds, all five pages serve
+correctly under `vite preview` with correct `/claude-drone/` asset paths,
+and `git log --follow` confirms file history survived the ticket 001 move).
+
+## Post-implementation notes (for whoever picks up ticket 004 / follow-ups)
+
+- An independent 8-agent review compared every new module against the
+  pre-split monolith line-by-line and found **no behavior regressions** —
+  this is a faithful structural port, not a rewrite.
+- The review did surface several **pre-existing bugs in the original
+  monolith** (carried over unchanged, not introduced by this split) that are
+  worth their own follow-up tickets if anyone wants to fix them:
+  - FX-panel knobs (`fx-page.ts`) close over `AppState.fx.*` by reference at
+    boot; `loadSettings()` later reassigns `AppState.fx` wholesale, so FX
+    knob changes after that point write into an orphaned object and don't
+    survive a page reload / preset switch.
+  - `scheduleAutoSave()`'s call inside `loadSettings()` is a no-op (fires
+    while `persistSuspended` is still `true`), so applying a preset or
+    loading a JSON file never actually persists the change.
+  - Computer-keyboard note-off (`keyup`) recomputes the note from the
+    *current* `octaveBase` rather than the octave in effect at key-down, so
+    shifting octave while a key is held can leave a stuck note.
+  - `buildKeyboard()` fully tears down/rebuilds keyboard DOM (e.g. on preset
+    load or window resize) with no `setPointerCapture`, which can also drop
+    a `pointerup` and leave a stuck note if a preset is applied mid-press.
+  - `Engine.resume()` returns an unhandled promise; `Recorder`'s blob-URL
+    revoke uses a fixed 1s timer instead of waiting for the download.
+- Minor dead-code/duplication cleanup was done as part of this pass (not
+  full restructuring, to stay within "split, not rewrite" scope): removed
+  the write-only `activeVisual` map in `keyboard.ts`, removed `unit:` knob
+  options shadowed by an always-present `formatter`, and deduplicated the
+  4x-copied octave-shift logic into one `shiftOctave()` helper.
+- Left as **follow-up, not done**: the review also flagged real but riskier
+  duplication — LFO1/LFO2 panel wiring in `audio/voice.ts` (~90 lines
+  copy-pasted, could use the `LfoSlot`-style abstraction `note-voice.ts`
+  already has), and FX parameter tables duplicated between `fx-page.ts` and
+  `persistence.ts`'s `applyFxSettings`. Both are legitimate simplification
+  targets but were judged too large to do safely in the same pass as the
+  structural split.

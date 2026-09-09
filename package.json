@@ -6,7 +6,7 @@
   "workspaces": ["drone-synth"],
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && npm run build --workspace=drone-synth && cp -r drone-synth/dist/. dist/",
     "preview": "vite preview"
   },
   "devDependencies": {
