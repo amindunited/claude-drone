@@ -209,7 +209,8 @@ export class Voice {
               <select class="control" data-p="lfoTarget">
                 <option value="none">Target: Off</option>
                 <option value="pitch">Target: Pitch</option>
-                <option value="filter">Target: Filter</option>
+                <option value="filter">Target: Filter 1</option>
+                <option value="filter2">Target: Filter 2</option>
                 <option value="amplitude">Target: Amplitude</option>
               </select>
             </div>
@@ -233,7 +234,8 @@ export class Voice {
               <select class="control" data-p="lfo2Target">
                 <option value="none">Target: Off</option>
                 <option value="pitch">Target: Pitch</option>
-                <option value="filter">Target: Filter</option>
+                <option value="filter">Target: Filter 1</option>
+                <option value="filter2">Target: Filter 2</option>
                 <option value="amplitude">Target: Amplitude</option>
               </select>
             </div>

@@ -1,6 +1,6 @@
 export type OscType = 'sine' | 'sawtooth' | 'triangle' | 'pulse' | 'noise';
 export type FilterType = 'lowpass' | 'highpass' | 'bandpass';
-export type LfoTarget = 'none' | 'pitch' | 'filter' | 'amplitude';
+export type LfoTarget = 'none' | 'pitch' | 'filter' | 'filter2' | 'amplitude';
 export type LfoRateMode = 'hz' | 'sync';
 export type DelayMode = 'seconds' | 'frequency' | 'measures';
 export type FxKey = 'distortion' | 'chorus' | 'delay' | 'reverb';

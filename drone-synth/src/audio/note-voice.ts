@@ -229,6 +229,8 @@ export class NoteVoice {
       if (this.osc2Src) state.depth.connect(this.osc2Src.detune);
     } else if (target === 'filter') {
       state.depth.connect(this.filter.frequency);
+    } else if (target === 'filter2') {
+      state.depth.connect(this.filter2.frequency);
     } else if (target === 'amplitude') {
       state.depth.connect(this.amp.gain);
     }
@@ -238,7 +240,7 @@ export class NoteVoice {
   private _applyLfoSettings(state: LfoState, settings: LfoSettings): void {
     let depthVal = 0;
     if (settings.target === 'pitch') depthVal = settings.depth * 1200; // cents (0-1 -> 0-1200)
-    else if (settings.target === 'filter') depthVal = settings.depth * 4000; // Hz
+    else if (settings.target === 'filter' || settings.target === 'filter2') depthVal = settings.depth * 4000; // Hz
     else if (settings.target === 'amplitude') depthVal = settings.depth * 0.5; // gain
     state.depth.gain.setTargetAtTime(depthVal, Engine.ctx!.currentTime, 0.03);
   }
