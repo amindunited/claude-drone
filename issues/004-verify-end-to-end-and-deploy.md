@@ -1,6 +1,6 @@
 # 004 — End-to-end verification and deploy
 
-Status: **local verification done; only push + post-merge live check remains.**
+Status: **done.**
 
 ## Background
 
@@ -24,16 +24,19 @@ build wired to produce `dist/drone-synth.html`).
 - [x] Confirm `git log --follow drone-synth/drone-synth.html` (or equivalent)
   still shows history from before the `git mv` in ticket 001, i.e. file
   history was preserved through the move.
-- [ ] Push and let the real GH Pages workflow run once merged; check the live
+- [x] Push and let the real GH Pages workflow run once merged; check the live
   deploy at `https://amindunited.github.io/claude-drone/` and
   `https://amindunited.github.io/claude-drone/drone-synth.html` after
-  publish. **Still outstanding** — branch `feat/stata-drone` is 2 commits
-  ahead of `origin/feat/stata-drone` (unpushed) and hasn't been merged to
-  `main` (which is 11 commits behind on this branch's history).
+  publish. `feat/stata-drone` was merged to `main` via PR #4 (`8e83c46`);
+  the `gh-pages.yml` workflow run for that merge completed successfully
+  (run `34427936137`). Confirmed live: `/` and `/drone-synth.html` both
+  return 200, root links to `drone-synth.html`, the page title
+  (`STRATA — Drone Synth`) renders, and its JS/CSS assets
+  (`assets/droneSynth-*.js`/`.css`) resolve with 200.
 
 ## Acceptance criteria
 
 - [x] Clean `npm ci && npm run build` at root succeeds with no manual steps.
 - [x] All manual checks above pass with no regressions vs. pre-extraction
   behavior.
-- [ ] Live GH Pages deploy confirmed working post-merge.
+- [x] Live GH Pages deploy confirmed working post-merge.
