@@ -1,0 +1,583 @@
+import { Knob, type KnobOptions } from '../ui/knob';
+import { DEFAULT_VOICE_PARAMS, FX_KEYS, FX_LABELS, LFO_DIVISIONS } from '../constants';
+import { cloneData, nextId } from '../utils/dsp';
+import type { FxKey, VoiceParams } from '../types';
+import { scheduleAutoSave } from '../persistence';
+import { removeVoice, voices } from '../voices';
+import { Engine } from './engine';
+import { NoteVoice } from './note-voice';
+
+export class Voice {
+  id: string;
+  name: string;
+  enabled: boolean;
+  activeNotes = new Map<number, NoteVoice>();
+  params: VoiceParams;
+
+  bus: GainNode;
+  levelGain: GainNode;
+  sendGains!: Record<FxKey, GainNode>;
+
+  panelEl!: HTMLDivElement;
+  ledEl!: HTMLElement;
+  enableBtn!: HTMLButtonElement;
+
+  private _lfoRateKnob: Knob | null = null;
+  private _lfoRateKnob2: Knob | null = null;
+
+  constructor(name: string, preset: Partial<VoiceParams> | undefined, enabled: boolean | undefined) {
+    this.id = nextId();
+    this.name = name;
+    this.enabled = enabled !== undefined ? !!enabled : true;
+    this.params = Object.assign({}, DEFAULT_VOICE_PARAMS, preset || {});
+    this.params.sends = Object.assign({}, DEFAULT_VOICE_PARAMS.sends, (preset || {}).sends || {});
+
+    const ctx = Engine.ctx!;
+    this.bus = ctx.createGain();
+    this.bus.gain.value = 1;
+    this.levelGain = ctx.createGain();
+    this.levelGain.gain.value = this.params.level;
+    this.bus.connect(this.levelGain).connect(Engine.master!);
+    this.sendGains = {} as Record<FxKey, GainNode>;
+    FX_KEYS.forEach((k) => {
+      const g = ctx.createGain();
+      g.gain.value = this.params.sends[k];
+      this.levelGain.connect(g).connect(Engine.fx[k].input);
+      this.sendGains[k] = g;
+    });
+
+    this._buildPanel();
+  }
+
+  noteOn(note: number, velocity: number): void {
+    if (!this.enabled) return;
+    if (this.activeNotes.has(note)) {
+      this.activeNotes.get(note)!.forceStop();
+    }
+    const nv = new NoteVoice(this, note, velocity);
+    this.activeNotes.set(note, nv);
+    this._ledUpdate();
+  }
+
+  noteOff(note: number): void {
+    const nv = this.activeNotes.get(note);
+    if (nv) {
+      nv.release();
+      this.activeNotes.delete(note);
+    }
+    this._ledUpdate();
+  }
+
+  allNotesOff(): void {
+    this.activeNotes.forEach((nv) => nv.forceStop());
+    this.activeNotes.clear();
+    this._ledUpdate();
+  }
+
+  private _ledUpdate(): void {
+    if (this.ledEl) this.ledEl.classList.toggle('active', this.activeNotes.size > 0);
+  }
+
+  private _liveUpdate(): void {
+    this.activeNotes.forEach((nv) => nv.updateLive(this.params));
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = !!enabled;
+    if (!this.enabled) this.allNotesOff();
+    this._paintEnabled();
+    scheduleAutoSave();
+  }
+
+  setLevel(v: number): void {
+    this.params.level = v;
+    this.levelGain.gain.setTargetAtTime(v, Engine.ctx!.currentTime, 0.02);
+  }
+
+  setSend(k: FxKey, v: number): void {
+    this.params.sends[k] = v;
+    this.sendGains[k].gain.setTargetAtTime(v, Engine.ctx!.currentTime, 0.02);
+  }
+
+  serialize(): { name: string; enabled: boolean; params: VoiceParams } {
+    return { name: this.name, enabled: this.enabled, params: cloneData(this.params) };
+  }
+
+  dispose(): void {
+    this.allNotesOff();
+    ([this.bus, this.levelGain, ...Object.values(this.sendGains)] as AudioNode[]).forEach((n) => {
+      try {
+        n.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    });
+    if (this.panelEl) this.panelEl.remove();
+  }
+
+  private _paintEnabled(): void {
+    if (!this.enableBtn) return;
+    this.enableBtn.classList.toggle('on', this.enabled);
+    this.enableBtn.classList.toggle('off', !this.enabled);
+  }
+
+  private _buildPanel(): void {
+    const p = this.params;
+    const panel = document.createElement('div');
+    panel.className = 'voice-panel';
+    panel.innerHTML = `
+      <div class="vp-head">
+        <span class="vp-led"></span>
+        <input class="vp-name" value="${this.name}" spellcheck="false"/>
+        <button class="icon-btn toggle on" title="Enable/disable voice" data-act="enable">●</button>
+        <button class="icon-btn danger" title="Remove voice" data-act="remove">✕</button>
+      </div>
+      <div class="vp-body">
+        <div class="section">
+          <p class="section-label">Oscillator</p>
+          <div class="row-select">
+            <select class="control" data-p="osc">
+              <option value="sine">Sine</option>
+              <option value="sawtooth">Saw</option>
+              <option value="triangle">Triangle</option>
+              <option value="pulse">Pulse</option>
+              <option value="noise">Noise</option>
+            </select>
+          </div>
+          <div class="knob-grid n2" data-group="osc-knobs"></div>
+        </div>
+
+        <div class="section">
+          <p class="section-label">Envelope</p>
+          <div class="knob-grid" data-group="adsr"></div>
+        </div>
+
+        <div class="section">
+          <p class="section-label">Filter</p>
+          <div class="row-select">
+            <select class="control" data-p="filterType">
+              <option value="lowpass">Low‑pass</option>
+              <option value="highpass">High‑pass</option>
+              <option value="bandpass">Band‑pass</option>
+            </select>
+          </div>
+          <div class="knob-grid n3" data-group="filter"></div>
+        </div>
+
+        <div class="section collapsible expanded" data-section="lfo">
+          <button type="button" class="section-label section-toggle" data-act="toggle-lfo" aria-expanded="true">
+            LFO 1 / Modulation <span class="chev">▾</span>
+          </button>
+          <div class="section-content">
+            <div class="row-select">
+              <select class="control" data-p="lfoTarget">
+                <option value="none">Target: Off</option>
+                <option value="pitch">Target: Pitch</option>
+                <option value="filter">Target: Filter</option>
+                <option value="amplitude">Target: Amplitude</option>
+              </select>
+            </div>
+            <div class="toggle-row" data-group="lforate-toggle">
+              <button class="toggle-pill" data-rate="hz">Hz</button>
+              <button class="toggle-pill" data-rate="sync">Sync</button>
+            </div>
+            <div class="row-select" data-group="lfo-sync-select" style="display:none;">
+              <select class="control" data-p="lfoRateDivision"></select>
+            </div>
+            <div class="knob-grid n2" data-group="lfo-knobs"></div>
+          </div>
+        </div>
+
+        <div class="section collapsible collapsed" data-section="lfo2">
+          <button type="button" class="section-label section-toggle" data-act="toggle-lfo2" aria-expanded="false">
+            LFO 2 / Modulation <span class="chev">▾</span>
+          </button>
+          <div class="section-content">
+            <div class="row-select">
+              <select class="control" data-p="lfo2Target">
+                <option value="none">Target: Off</option>
+                <option value="pitch">Target: Pitch</option>
+                <option value="filter">Target: Filter</option>
+                <option value="amplitude">Target: Amplitude</option>
+              </select>
+            </div>
+            <div class="toggle-row" data-group="lfo2rate-toggle">
+              <button class="toggle-pill" data-rate="hz">Hz</button>
+              <button class="toggle-pill" data-rate="sync">Sync</button>
+            </div>
+            <div class="row-select" data-group="lfo2-sync-select" style="display:none;">
+              <select class="control" data-p="lfo2RateDivision"></select>
+            </div>
+            <div class="knob-grid n2" data-group="lfo2-knobs"></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <p class="section-label">Mix &amp; Sends</p>
+          <div class="knob-grid n2" data-group="level"></div>
+          <div class="send-row" data-group="sends"></div>
+        </div>
+      </div>
+    `;
+    document.getElementById('voicesRow')!.insertBefore(panel, document.getElementById('addVoiceWrap'));
+    this.panelEl = panel;
+    this.ledEl = panel.querySelector('.vp-led')!;
+
+    /* wire selects */
+    const oscSel = panel.querySelector<HTMLSelectElement>('[data-p="osc"]')!;
+    oscSel.value = p.osc;
+    oscSel.addEventListener('change', (e) => {
+      p.osc = (e.target as HTMLSelectElement).value as VoiceParams['osc'];
+      this._renderOscKnobs();
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+    const filterSel = panel.querySelector<HTMLSelectElement>('[data-p="filterType"]')!;
+    filterSel.value = p.filterType;
+    filterSel.addEventListener('change', (e) => {
+      p.filterType = (e.target as HTMLSelectElement).value as VoiceParams['filterType'];
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+    const targetSel = panel.querySelector<HTMLSelectElement>('[data-p="lfoTarget"]')!;
+    targetSel.value = p.lfoTarget;
+    targetSel.addEventListener('change', (e) => {
+      p.lfoTarget = (e.target as HTMLSelectElement).value as VoiceParams['lfoTarget'];
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+    const targetSel2 = panel.querySelector<HTMLSelectElement>('[data-p="lfo2Target"]')!;
+    targetSel2.value = p.lfo2Target;
+    targetSel2.addEventListener('change', (e) => {
+      p.lfo2Target = (e.target as HTMLSelectElement).value as VoiceParams['lfo2Target'];
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+
+    const divSel = panel.querySelector<HTMLSelectElement>('[data-p="lfoRateDivision"]')!;
+    LFO_DIVISIONS.forEach((d) => {
+      const o = document.createElement('option');
+      o.value = String(d.beats);
+      o.textContent = d.label;
+      divSel.appendChild(o);
+    });
+    divSel.value = String(p.lfoRateDivision);
+    divSel.addEventListener('change', (e) => {
+      p.lfoRateDivision = parseFloat((e.target as HTMLSelectElement).value);
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+
+    const divSel2 = panel.querySelector<HTMLSelectElement>('[data-p="lfo2RateDivision"]')!;
+    LFO_DIVISIONS.forEach((d) => {
+      const o = document.createElement('option');
+      o.value = String(d.beats);
+      o.textContent = d.label;
+      divSel2.appendChild(o);
+    });
+    divSel2.value = String(p.lfo2RateDivision);
+    divSel2.addEventListener('change', (e) => {
+      p.lfo2RateDivision = parseFloat((e.target as HTMLSelectElement).value);
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+
+    const rateToggleWrap = panel.querySelector<HTMLElement>('[data-group="lforate-toggle"]')!;
+    const syncSelectWrap = panel.querySelector<HTMLElement>('[data-group="lfo-sync-select"]')!;
+    const lfoSection = panel.querySelector<HTMLElement>('[data-section="lfo"]')!;
+    const lfoToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-lfo"]')!;
+    const paintRateToggle = () => {
+      rateToggleWrap.querySelectorAll<HTMLButtonElement>('.toggle-pill').forEach((b) => b.classList.toggle('active', b.dataset.rate === p.lfoRateMode));
+      syncSelectWrap.style.display = p.lfoRateMode === 'sync' ? 'flex' : 'none';
+      if (this._lfoRateKnob) this._lfoRateKnob.el.style.display = p.lfoRateMode === 'sync' ? 'none' : 'flex';
+    };
+    lfoToggleBtn.addEventListener('click', () => {
+      const collapsed = lfoSection.classList.toggle('collapsed');
+      lfoSection.classList.toggle('expanded', !collapsed);
+      lfoToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+    });
+    rateToggleWrap.querySelectorAll<HTMLButtonElement>('.toggle-pill').forEach((b) => {
+      b.addEventListener('click', () => {
+        p.lfoRateMode = b.dataset.rate as VoiceParams['lfoRateMode'];
+        paintRateToggle();
+        this._liveUpdate();
+        scheduleAutoSave();
+      });
+    });
+
+    const rateToggleWrap2 = panel.querySelector<HTMLElement>('[data-group="lfo2rate-toggle"]')!;
+    const syncSelectWrap2 = panel.querySelector<HTMLElement>('[data-group="lfo2-sync-select"]')!;
+    const lfoSection2 = panel.querySelector<HTMLElement>('[data-section="lfo2"]')!;
+    const lfoToggleBtn2 = panel.querySelector<HTMLButtonElement>('[data-act="toggle-lfo2"]')!;
+    const paintRateToggle2 = () => {
+      rateToggleWrap2
+        .querySelectorAll<HTMLButtonElement>('.toggle-pill')
+        .forEach((b) => b.classList.toggle('active', b.dataset.rate === p.lfo2RateMode));
+      syncSelectWrap2.style.display = p.lfo2RateMode === 'sync' ? 'flex' : 'none';
+      if (this._lfoRateKnob2) this._lfoRateKnob2.el.style.display = p.lfo2RateMode === 'sync' ? 'none' : 'flex';
+    };
+    lfoToggleBtn2.addEventListener('click', () => {
+      const collapsed = lfoSection2.classList.toggle('collapsed');
+      lfoSection2.classList.toggle('expanded', !collapsed);
+      lfoToggleBtn2.setAttribute('aria-expanded', String(!collapsed));
+    });
+    rateToggleWrap2.querySelectorAll<HTMLButtonElement>('.toggle-pill').forEach((b) => {
+      b.addEventListener('click', () => {
+        p.lfo2RateMode = b.dataset.rate as VoiceParams['lfo2RateMode'];
+        paintRateToggle2();
+        this._liveUpdate();
+        scheduleAutoSave();
+      });
+    });
+
+    /* header buttons */
+    panel.querySelector('[data-act="remove"]')!.addEventListener('click', () => {
+      if (voices.length <= 1) {
+        alert('At least one voice is required.');
+        return;
+      }
+      removeVoice(this.id);
+    });
+    const enableBtn = panel.querySelector<HTMLButtonElement>('[data-act="enable"]')!;
+    this.enableBtn = enableBtn;
+    enableBtn.addEventListener('click', () => {
+      this.setEnabled(!this.enabled);
+    });
+    panel.querySelector('.vp-name')!.addEventListener('input', (e) => {
+      this.name = (e.target as HTMLInputElement).value;
+      scheduleAutoSave();
+    });
+
+    /* knobs */
+    this._renderOscKnobs();
+
+    const adsr = panel.querySelector<HTMLElement>('[data-group="adsr"]')!;
+    this._mk(adsr, {
+      label: 'ATK',
+      min: 0.001,
+      max: 6,
+      value: p.attack,
+      default: 0.6,
+      log: true,
+      formatter: (v) => v.toFixed(2) + 's',
+      onChange: (v) => {
+        p.attack = v;
+      },
+    });
+    this._mk(adsr, {
+      label: 'DEC',
+      min: 0.001,
+      max: 6,
+      value: p.decay,
+      default: 0.4,
+      log: true,
+      formatter: (v) => v.toFixed(2) + 's',
+      onChange: (v) => {
+        p.decay = v;
+      },
+    });
+    this._mk(adsr, {
+      label: 'SUS',
+      min: 0,
+      max: 1,
+      value: p.sustain,
+      default: 0.75,
+      step: 0.01,
+      formatter: (v) => Math.round(v * 100) + '%',
+      onChange: (v) => {
+        p.sustain = v;
+      },
+    });
+    this._mk(adsr, {
+      label: 'REL',
+      min: 0.02,
+      max: 30,
+      value: p.release,
+      default: 1.2,
+      log: true,
+      formatter: (v) => v.toFixed(2) + 's',
+      onChange: (v) => {
+        p.release = v;
+      },
+    });
+
+    const filt = panel.querySelector<HTMLElement>('[data-group="filter"]')!;
+    this._mk(filt, {
+      label: 'CUTOFF',
+      min: 40,
+      max: 16000,
+      value: p.cutoff,
+      default: 2200,
+      log: true,
+      formatter: (v) => Math.round(v) + 'Hz',
+      onChange: (v) => {
+        p.cutoff = v;
+        this._liveUpdate();
+      },
+    });
+    this._mk(filt, {
+      label: 'RESO/Q',
+      min: 0.05,
+      max: 24,
+      value: p.resonance,
+      default: 1,
+      log: true,
+      formatter: (v) => v.toFixed(2),
+      onChange: (v) => {
+        p.resonance = v;
+        this._liveUpdate();
+      },
+    });
+    this._mk(filt, {
+      label: 'ENV DEPTH',
+      min: -6000,
+      max: 6000,
+      value: p.envDepth,
+      default: 0,
+      step: 10,
+      formatter: (v) => Math.round(v) + 'Hz',
+      onChange: (v) => {
+        p.envDepth = v;
+        this._liveUpdate();
+      },
+    });
+
+    const lfoK = panel.querySelector<HTMLElement>('[data-group="lfo-knobs"]')!;
+    this._lfoRateKnob = this._mk(lfoK, {
+      label: 'RATE',
+      min: 0.02,
+      max: 20,
+      value: p.lfoRateHz,
+      default: 2,
+      log: true,
+      formatter: (v) => v.toFixed(2) + 'Hz',
+      onChange: (v) => {
+        p.lfoRateHz = v;
+        this._liveUpdate();
+      },
+    });
+    this._mk(lfoK, {
+      label: 'DEPTH',
+      min: 0,
+      max: 1,
+      value: p.lfoDepth,
+      default: 0.3,
+      step: 0.01,
+      formatter: (v) => Math.round(v * 100) + '%',
+      onChange: (v) => {
+        p.lfoDepth = v;
+        this._liveUpdate();
+      },
+    });
+
+    const lfoK2 = panel.querySelector<HTMLElement>('[data-group="lfo2-knobs"]')!;
+    this._lfoRateKnob2 = this._mk(lfoK2, {
+      label: 'RATE',
+      min: 0.02,
+      max: 20,
+      value: p.lfo2RateHz,
+      default: 0.5,
+      log: true,
+      formatter: (v) => v.toFixed(2) + 'Hz',
+      onChange: (v) => {
+        p.lfo2RateHz = v;
+        this._liveUpdate();
+      },
+    });
+    this._mk(lfoK2, {
+      label: 'DEPTH',
+      min: 0,
+      max: 1,
+      value: p.lfo2Depth,
+      default: 0,
+      step: 0.01,
+      formatter: (v) => Math.round(v * 100) + '%',
+      onChange: (v) => {
+        p.lfo2Depth = v;
+        this._liveUpdate();
+      },
+    });
+
+    paintRateToggle();
+    paintRateToggle2();
+
+    const lvl = panel.querySelector<HTMLElement>('[data-group="level"]')!;
+    this._mk(lvl, {
+      label: 'LEVEL',
+      min: 0,
+      max: 1,
+      value: p.level,
+      default: 0.7,
+      step: 0.01,
+      formatter: (v) => Math.round(v * 100) + '%',
+      onChange: (v) => this.setLevel(v),
+    });
+
+    const sends = panel.querySelector<HTMLElement>('[data-group="sends"]')!;
+    FX_KEYS.forEach((k) => {
+      this._mk(sends, {
+        label: FX_LABELS[k],
+        min: 0,
+        max: 1,
+        value: p.sends[k],
+        default: 0,
+        step: 0.01,
+        size: 40,
+        formatter: (v) => Math.round(v * 100) + '%',
+        onChange: (v) => this.setSend(k, v),
+      });
+    });
+
+    this._paintEnabled();
+  }
+
+  private _mk(container: Element, opts: KnobOptions): Knob {
+    const onChange = opts.onChange || function () {};
+    const k = new Knob(
+      Object.assign({}, opts, {
+        onChange: (value: number) => {
+          onChange(value);
+          scheduleAutoSave();
+        },
+      }),
+    );
+    container.appendChild(k.el);
+    return k;
+  }
+
+  private _renderOscKnobs(): void {
+    const p = this.params;
+    const container = this.panelEl.querySelector<HTMLElement>('[data-group="osc-knobs"]')!;
+    container.innerHTML = '';
+    this.panelEl.querySelector<HTMLSelectElement>('[data-p="osc"]')!.value = p.osc;
+    this._mk(container, {
+      label: 'PITCH',
+      min: -24,
+      max: 24,
+      value: p.pitch,
+      default: 0,
+      step: 0.5,
+      size: 52,
+      formatter: (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}st`,
+      onChange: (v) => {
+        p.pitch = v;
+        this._liveUpdate();
+      },
+    });
+    if (p.osc === 'pulse') {
+      this._mk(container, {
+        label: 'WIDTH',
+        min: 0.02,
+        max: 0.98,
+        value: p.pulseWidth,
+        default: 0.5,
+        step: 0.01,
+        size: 52,
+        formatter: (v) => Math.round(v * 100) + '%',
+        onChange: (v) => {
+          p.pulseWidth = v;
+        },
+      });
+    }
+  }
+}

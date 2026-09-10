@@ -15,7 +15,9 @@ export default defineConfig({
         original: resolve(__dirname, 'src/original.html'),
         twoLfos: resolve(__dirname, 'src/two-lfos.html'),
         tsSynth: resolve(__dirname, 'src/ts-synth.html'),
-        droneSynth: resolve(__dirname, 'src/drone-synth.html'),
+        // drone-synth.html now lives in the drone-synth/ workspace package
+        // (see drone-synth/vite.config.js); its build output is copied into
+        // this root dist/ by the root "build" script in package.json.
         // Add more pages here as needed
         // dashboard: resolve(__dirname, 'src/dashboard.html'),
         // login: resolve(__dirname, 'src/login.html'),

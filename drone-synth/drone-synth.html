@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STRATA — Drone Synth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+
+<div class="audio-gate" id="audioGate">
+  <div class="brand"><span class="mark"></span><h1>Strata</h1></div>
+  <p>Strata plays through your speakers. Click below to enable audio, then connect a MIDI device or use the on‑screen keyboard.</p>
+  <button id="startBtn">Enable Audio</button>
+</div>
+
+<div id="app">
+  <header>
+    <div class="brand"><span class="mark"></span><h1>Strata</h1></div>
+    <span class="brand sub">MULTI‑VOICE DRONE ENGINE</span>
+
+    <nav class="tabs">
+      <button id="tabSynth" class="active">Voices</button>
+      <button id="tabFx">Send FX</button>
+    </nav>
+
+    <div class="header-spacer"></div>
+
+    <div class="global-control">
+      <label>BPM</label>
+      <svg id="bpmKnobMount"></svg>
+    </div>
+    <div class="global-control">
+      <label>Master</label>
+      <svg id="masterKnobMount"></svg>
+    </div>
+
+    <div id="midiStatus">
+      <span id="midiDot"></span>
+      <span id="midiText">MIDI: checking…</span>
+      <select id="midiSelect"><option value="all">All inputs</option></select>
+    </div>
+
+    <label class="record-control" for="recordEnable">
+      <input type="checkbox" id="recordEnable" />
+      <span>Record to WAV</span>
+      <span class="record-state" id="recordState">Off</span>
+    </label>
+
+    <div class="settings-control">
+      <select id="presetSelect" aria-label="Preset library">
+        <option value="">Preset Library</option>
+      </select>
+      <button id="savePresetBtn" type="button">Save Preset</button>
+      <button id="renamePresetBtn" type="button">Rename</button>
+      <button id="duplicatePresetBtn" type="button">Duplicate</button>
+      <button id="deletePresetBtn" type="button">Delete Preset</button>
+      <button id="factoryResetBtn" type="button">Factory Reset</button>
+      <button id="saveSettingsBtn" type="button">Save JSON</button>
+      <button id="loadSettingsBtn" type="button">Load JSON</button>
+      <input id="loadSettingsInput" type="file" accept="application/json,.json" hidden />
+    </div>
+  </header>
+
+  <main id="synthView" class="active">
+    <p class="hint">Each voice is an independent oscillator chain with its own envelope, filter, and LFO, plus <b>4 sends</b> to the shared effects in the <b>Send FX</b> tab. Configure the returns there.</p>
+    <div id="voicesRow">
+      <div id="addVoiceWrap">
+        <button id="addVoiceBtn"><span class="plus">+</span><span>Add Voice</span></button>
+      </div>
+    </div>
+  </main>
+
+  <main id="fxView">
+    <p class="hint">All voices route into these four shared buses via their send knobs. Adjust character and return level here.</p>
+    <div id="fxGrid"></div>
+  </main>
+
+  <footer>
+    <div class="kb-toolbar">
+      <div class="octave-ctl">
+        <button class="small" id="octDown">−</button>
+        <span id="octLabel">OCT 4</span>
+        <button class="small" id="octUp">+</button>
+      </div>
+      <button id="sustainToggle" class="sustain-btn" type="button" aria-pressed="false">Sustain Off</button>
+      <span class="note-hint">Keyboard row A W S E D F T G Y H U J K plays notes · Z / X shifts octave</span>
+    </div>
+    <div id="keyboard"></div>
+  </footer>
+</div>
+
+<script type="module" src="./src/main.ts"></script>
+</body>
+</html>
