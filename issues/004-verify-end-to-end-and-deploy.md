@@ -1,15 +1,18 @@
 # 004 — End-to-end verification and deploy
 
+Status: **local verification done; only push + post-merge live check remains.**
+
 ## Background
 
-See `HANDOFF.md`. Final ticket in the `drone-synth` extraction — depends on
-tickets 001–003 all being complete.
+See `HANDOFF.md`. Final ticket in the `drone-synth` extraction. Tickets
+001–003 are complete (package scaffolded, code split into TS modules, root
+build wired to produce `dist/drone-synth.html`).
 
 ## Scope
 
-- Run `npm ci && npm run build` from a clean state at repo root (mirroring
+- [x] Run `npm ci && npm run build` from a clean state at repo root (mirroring
   exactly what `.github/workflows/gh-pages.yml` does) and confirm it succeeds.
-- Serve the built `dist/` locally (e.g. `npm run preview`) and manually verify:
+- [x] Serve the built `dist/` locally (e.g. `npm run preview`) and manually verify:
   - `/` (root index) loads and its link to the drone synth works.
   - `/drone-synth.html` loads at the correct path with no console errors
     (missing assets, wrong MIME types, broken relative paths).
@@ -18,17 +21,19 @@ tickets 001–003 all being complete.
     testable, FX chain (distortion/chorus/delay/reverb), keyboard + sustain.
   - The other four pages (`original.html`, `two-lfos.html`, `ts-synth.html`)
     still work, confirming they were untouched by the extraction.
-- Confirm `git log --follow drone-synth/drone-synth.html` (or equivalent)
+- [x] Confirm `git log --follow drone-synth/drone-synth.html` (or equivalent)
   still shows history from before the `git mv` in ticket 001, i.e. file
   history was preserved through the move.
-- Push and let the real GH Pages workflow run once merged; check the live
+- [ ] Push and let the real GH Pages workflow run once merged; check the live
   deploy at `https://amindunited.github.io/claude-drone/` and
   `https://amindunited.github.io/claude-drone/drone-synth.html` after
-  publish.
+  publish. **Still outstanding** — branch `feat/stata-drone` is 2 commits
+  ahead of `origin/feat/stata-drone` (unpushed) and hasn't been merged to
+  `main` (which is 11 commits behind on this branch's history).
 
 ## Acceptance criteria
 
-- Clean `npm ci && npm run build` at root succeeds with no manual steps.
-- All manual checks above pass with no regressions vs. pre-extraction
+- [x] Clean `npm ci && npm run build` at root succeeds with no manual steps.
+- [x] All manual checks above pass with no regressions vs. pre-extraction
   behavior.
-- Live GH Pages deploy confirmed working post-merge.
+- [ ] Live GH Pages deploy confirmed working post-merge.
