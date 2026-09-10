@@ -1,5 +1,5 @@
 import { clamp, noiseBuffer, noteToFreq, pulseWave } from '../utils/dsp';
-import type { LfoRateMode, LfoTarget, VoiceParams } from '../types';
+import type { LfoRateMode, LfoTarget, OscType, VoiceParams } from '../types';
 import { Engine, type SyncedLfoEntry } from './engine';
 import type { Voice } from './voice';
 
@@ -33,6 +33,8 @@ export class NoteVoice {
   releasing = false;
   pitchSemitones: number;
   src: OscillatorNode | AudioBufferSourceNode;
+  osc2Src?: OscillatorNode | AudioBufferSourceNode;
+  osc2Gain?: GainNode;
   filter: BiquadFilterNode;
   fenv: ConstantSourceNode;
   fenvGain: GainNode;
@@ -49,22 +51,8 @@ export class NoteVoice {
     this.pitchSemitones = p.pitch || 0;
 
     /* source */
-    let src: OscillatorNode | AudioBufferSourceNode;
-    if (p.osc === 'noise') {
-      const bufferSrc = ctx.createBufferSource();
-      bufferSrc.buffer = noiseBuffer(ctx);
-      bufferSrc.loop = true;
-      src = bufferSrc;
-    } else {
-      const oscSrc = ctx.createOscillator();
-      if (p.osc === 'pulse') {
-        oscSrc.setPeriodicWave(pulseWave(ctx, p.pulseWidth));
-      } else {
-        oscSrc.type = p.osc;
-      }
-      oscSrc.frequency.value = noteToFreq(note) * Math.pow(2, (p.pitch || 0) / 12);
-      src = oscSrc;
-    }
+    const freq1 = noteToFreq(note) * Math.pow(2, (p.pitch || 0) / 12);
+    const src = this._createOscSource(p.osc, p.pulseWidth, freq1);
     this.src = src;
 
     /* filter */
@@ -95,6 +83,11 @@ export class NoteVoice {
     this.lfo1 = this._createLfo('lfo', p);
     this.lfo2 = this._createLfo('lfo2', p);
 
+    /* optional second oscillator (VCO2), mixed into the same filter/LFO chain as VCO1 */
+    if (p.osc2Enabled) {
+      this._addOsc2(p);
+    }
+
     /* schedule ADSR */
     const vel = clamp(velocity / 127, 0.05, 1);
     const peak = vel;
@@ -108,6 +101,66 @@ export class NoteVoice {
     fenv.offset.setValueAtTime(0, now);
     fenv.offset.linearRampToValueAtTime(1, now + Math.max(0.002, p.attack));
     fenv.offset.linearRampToValueAtTime(p.sustain, now + p.attack + Math.max(0.002, p.decay));
+  }
+
+  private _createOscSource(type: OscType, pulseWidth: number, freq: number): OscillatorNode | AudioBufferSourceNode {
+    const ctx = Engine.ctx!;
+    if (type === 'noise') {
+      const bufferSrc = ctx.createBufferSource();
+      bufferSrc.buffer = noiseBuffer(ctx);
+      bufferSrc.loop = true;
+      return bufferSrc;
+    }
+    const oscSrc = ctx.createOscillator();
+    if (type === 'pulse') {
+      oscSrc.setPeriodicWave(pulseWave(ctx, pulseWidth));
+    } else {
+      oscSrc.type = type;
+    }
+    oscSrc.frequency.value = freq;
+    return oscSrc;
+  }
+
+  private _addOsc2(p: VoiceParams): void {
+    const freq2 = noteToFreq(this.note) * Math.pow(2, (p.osc2Pitch || 0) / 12);
+    const osc2Src = this._createOscSource(p.osc2, p.osc2PulseWidth, freq2);
+    const osc2Gain = Engine.ctx!.createGain();
+    osc2Gain.gain.value = p.osc2Level;
+    osc2Src.connect(osc2Gain).connect(this.filter);
+    osc2Src.start();
+    this.osc2Src = osc2Src;
+    this.osc2Gain = osc2Gain;
+    this._reconnectLfoTargets();
+  }
+
+  private _removeOsc2(): void {
+    if (this.osc2Src) {
+      try {
+        this.osc2Src.stop();
+      } catch {
+        /* already stopped */
+      }
+      try {
+        this.osc2Src.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    if (this.osc2Gain) {
+      try {
+        this.osc2Gain.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    this.osc2Src = undefined;
+    this.osc2Gain = undefined;
+    this._reconnectLfoTargets();
+  }
+
+  private _reconnectLfoTargets(): void {
+    this._connectLfoTarget(this.lfo1, this.lfo1.target ?? 'none');
+    this._connectLfoTarget(this.lfo2, this.lfo2.target ?? 'none');
   }
 
   private _createLfo(slot: LfoSlot, p: VoiceParams): LfoState {
@@ -137,6 +190,7 @@ export class NoteVoice {
     state.target = target;
     if (target === 'pitch') {
       state.depth.connect(this.src.detune);
+      if (this.osc2Src) state.depth.connect(this.osc2Src.detune);
     } else if (target === 'filter') {
       state.depth.connect(this.filter.frequency);
     } else if (target === 'amplitude') {
@@ -174,6 +228,20 @@ export class NoteVoice {
       const baseFreq = noteToFreq(this.note) * Math.pow(2, (p.pitch || 0) / 12);
       this.src.frequency.setTargetAtTime(baseFreq, now, 0.03);
     }
+    if (!!p.osc2Enabled !== !!this.osc2Src) {
+      if (p.osc2Enabled) {
+        this._addOsc2(p);
+      } else {
+        this._removeOsc2();
+      }
+    }
+    if (this.osc2Src && 'frequency' in this.osc2Src) {
+      const base2Freq = noteToFreq(this.note) * Math.pow(2, (p.osc2Pitch || 0) / 12);
+      this.osc2Src.frequency.setTargetAtTime(base2Freq, now, 0.03);
+    }
+    if (this.osc2Gain) {
+      this.osc2Gain.gain.setTargetAtTime(p.osc2Level, now, 0.03);
+    }
     this.filter.type = p.filterType;
     this.filter.frequency.setTargetAtTime(p.cutoff, now, 0.03);
     this.filter.Q.setTargetAtTime(p.resonance, now, 0.03);
@@ -205,6 +273,13 @@ export class NoteVoice {
     } catch {
       /* already stopped */
     }
+    if (this.osc2Src) {
+      try {
+        this.osc2Src.stop(stopAt);
+      } catch {
+        /* already stopped */
+      }
+    }
     try {
       this.lfo1.lfo.stop(stopAt);
     } catch {
@@ -229,6 +304,13 @@ export class NoteVoice {
     } catch {
       /* already stopped */
     }
+    if (this.osc2Src) {
+      try {
+        this.osc2Src.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
     try {
       this.lfo1.lfo.stop();
     } catch {
@@ -250,14 +332,15 @@ export class NoteVoice {
   private _cleanup(): void {
     Engine.syncedLfos.delete(this.lfo1.syncEntry);
     Engine.syncedLfos.delete(this.lfo2.syncEntry);
-    ([this.src, this.filter, this.amp, this.fenv, this.fenvGain, this.lfo1.lfo, this.lfo1.depth, this.lfo2.lfo, this.lfo2.depth] as AudioNode[]).forEach(
-      (n) => {
-        try {
-          n.disconnect();
-        } catch {
-          /* already disconnected */
-        }
-      },
-    );
+    const nodes: AudioNode[] = [this.src, this.filter, this.amp, this.fenv, this.fenvGain, this.lfo1.lfo, this.lfo1.depth, this.lfo2.lfo, this.lfo2.depth];
+    if (this.osc2Src) nodes.push(this.osc2Src);
+    if (this.osc2Gain) nodes.push(this.osc2Gain);
+    nodes.forEach((n) => {
+      try {
+        n.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    });
   }
 }

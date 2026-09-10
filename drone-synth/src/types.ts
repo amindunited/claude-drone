@@ -16,6 +16,11 @@ export interface VoiceParams {
   osc: OscType;
   pulseWidth: number;
   pitch: number;
+  osc2Enabled: boolean;
+  osc2: OscType;
+  osc2PulseWidth: number;
+  osc2Pitch: number;
+  osc2Level: number;
   attack: number;
   decay: number;
   sustain: number;

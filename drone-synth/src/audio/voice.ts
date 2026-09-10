@@ -147,6 +147,23 @@ export class Voice {
           <div class="knob-grid n2" data-group="osc-knobs"></div>
         </div>
 
+        <div class="section" data-section="osc2">
+          <p class="section-label">
+            <button class="icon-btn toggle off" title="Enable/disable oscillator 2" data-act="toggle-osc2">●</button>
+            Oscillator 2
+          </p>
+          <div class="row-select">
+            <select class="control" data-p="osc2">
+              <option value="sine">Sine</option>
+              <option value="sawtooth">Saw</option>
+              <option value="triangle">Triangle</option>
+              <option value="pulse">Pulse</option>
+              <option value="noise">Noise</option>
+            </select>
+          </div>
+          <div class="knob-grid n2" data-group="osc2-knobs"></div>
+        </div>
+
         <div class="section">
           <p class="section-label">Envelope</p>
           <div class="knob-grid" data-group="adsr"></div>
@@ -229,6 +246,26 @@ export class Voice {
     oscSel.addEventListener('change', (e) => {
       p.osc = (e.target as HTMLSelectElement).value as VoiceParams['osc'];
       this._renderOscKnobs();
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+    const osc2ToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-osc2"]')!;
+    const paintOsc2Enabled = () => {
+      osc2ToggleBtn.classList.toggle('on', p.osc2Enabled);
+      osc2ToggleBtn.classList.toggle('off', !p.osc2Enabled);
+    };
+    osc2ToggleBtn.addEventListener('click', () => {
+      p.osc2Enabled = !p.osc2Enabled;
+      paintOsc2Enabled();
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+    paintOsc2Enabled();
+    const osc2Sel = panel.querySelector<HTMLSelectElement>('[data-p="osc2"]')!;
+    osc2Sel.value = p.osc2;
+    osc2Sel.addEventListener('change', (e) => {
+      p.osc2 = (e.target as HTMLSelectElement).value as VoiceParams['osc2'];
+      this._renderOsc2Knobs();
       this._liveUpdate();
       scheduleAutoSave();
     });
@@ -350,6 +387,7 @@ export class Voice {
 
     /* knobs */
     this._renderOscKnobs();
+    this._renderOsc2Knobs();
 
     const adsr = panel.querySelector<HTMLElement>('[data-group="adsr"]')!;
     this._mk(adsr, {
@@ -576,6 +614,56 @@ export class Voice {
         formatter: (v) => Math.round(v * 100) + '%',
         onChange: (v) => {
           p.pulseWidth = v;
+        },
+      });
+    }
+  }
+
+  private _renderOsc2Knobs(): void {
+    const p = this.params;
+    const container = this.panelEl.querySelector<HTMLElement>('[data-group="osc2-knobs"]')!;
+    container.innerHTML = '';
+    this.panelEl.querySelector<HTMLSelectElement>('[data-p="osc2"]')!.value = p.osc2;
+    this._mk(container, {
+      label: 'PITCH',
+      min: -24,
+      max: 24,
+      value: p.osc2Pitch,
+      default: 0,
+      step: 0.5,
+      size: 52,
+      formatter: (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}st`,
+      onChange: (v) => {
+        p.osc2Pitch = v;
+        this._liveUpdate();
+      },
+    });
+    this._mk(container, {
+      label: 'LEVEL',
+      min: 0,
+      max: 1,
+      value: p.osc2Level,
+      default: 0,
+      step: 0.01,
+      size: 52,
+      formatter: (v) => Math.round(v * 100) + '%',
+      onChange: (v) => {
+        p.osc2Level = v;
+        this._liveUpdate();
+      },
+    });
+    if (p.osc2 === 'pulse') {
+      this._mk(container, {
+        label: 'WIDTH',
+        min: 0.02,
+        max: 0.98,
+        value: p.osc2PulseWidth,
+        default: 0.5,
+        step: 0.01,
+        size: 52,
+        formatter: (v) => Math.round(v * 100) + '%',
+        onChange: (v) => {
+          p.osc2PulseWidth = v;
         },
       });
     }
