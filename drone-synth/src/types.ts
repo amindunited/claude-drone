@@ -29,6 +29,11 @@ export interface VoiceParams {
   cutoff: number;
   resonance: number;
   envDepth: number;
+  filter2Enabled: boolean;
+  filter2Type: FilterType;
+  filter2Cutoff: number;
+  filter2Resonance: number;
+  filter2EnvDepth: number;
   lfoTarget: LfoTarget;
   lfoRateMode: LfoRateMode;
   lfoRateHz: number;

@@ -181,6 +181,25 @@ export class Voice {
           <div class="knob-grid n3" data-group="filter"></div>
         </div>
 
+        <div class="section collapsible collapsed" data-section="filter2">
+          <div class="section-label-row">
+            <button class="icon-btn toggle off" title="Enable/disable filter 2" data-act="toggle-filter2">●</button>
+            <button type="button" class="section-label section-toggle" data-act="toggle-filter2-panel" aria-expanded="false">
+              Filter 2 <span class="chev">▾</span>
+            </button>
+          </div>
+          <div class="section-content">
+            <div class="row-select">
+              <select class="control" data-p="filter2Type">
+                <option value="lowpass">Low‑pass</option>
+                <option value="highpass">High‑pass</option>
+                <option value="bandpass">Band‑pass</option>
+              </select>
+            </div>
+            <div class="knob-grid n3" data-group="filter2"></div>
+          </div>
+        </div>
+
         <div class="section collapsible expanded" data-section="lfo">
           <button type="button" class="section-label section-toggle" data-act="toggle-lfo" aria-expanded="true">
             LFO 1 / Modulation <span class="chev">▾</span>
@@ -273,6 +292,33 @@ export class Voice {
     filterSel.value = p.filterType;
     filterSel.addEventListener('change', (e) => {
       p.filterType = (e.target as HTMLSelectElement).value as VoiceParams['filterType'];
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+
+    const filter2ToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-filter2"]')!;
+    const paintFilter2Enabled = () => {
+      filter2ToggleBtn.classList.toggle('on', p.filter2Enabled);
+      filter2ToggleBtn.classList.toggle('off', !p.filter2Enabled);
+    };
+    filter2ToggleBtn.addEventListener('click', () => {
+      p.filter2Enabled = !p.filter2Enabled;
+      paintFilter2Enabled();
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+    paintFilter2Enabled();
+    const filter2Section = panel.querySelector<HTMLElement>('[data-section="filter2"]')!;
+    const filter2PanelBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-filter2-panel"]')!;
+    filter2PanelBtn.addEventListener('click', () => {
+      const collapsed = filter2Section.classList.toggle('collapsed');
+      filter2Section.classList.toggle('expanded', !collapsed);
+      filter2PanelBtn.setAttribute('aria-expanded', String(!collapsed));
+    });
+    const filter2Sel = panel.querySelector<HTMLSelectElement>('[data-p="filter2Type"]')!;
+    filter2Sel.value = p.filter2Type;
+    filter2Sel.addEventListener('change', (e) => {
+      p.filter2Type = (e.target as HTMLSelectElement).value as VoiceParams['filter2Type'];
       this._liveUpdate();
       scheduleAutoSave();
     });
@@ -476,6 +522,47 @@ export class Voice {
       formatter: (v) => Math.round(v) + 'Hz',
       onChange: (v) => {
         p.envDepth = v;
+        this._liveUpdate();
+      },
+    });
+
+    const filt2 = panel.querySelector<HTMLElement>('[data-group="filter2"]')!;
+    this._mk(filt2, {
+      label: 'CUTOFF',
+      min: 40,
+      max: 16000,
+      value: p.filter2Cutoff,
+      default: 2200,
+      log: true,
+      formatter: (v) => Math.round(v) + 'Hz',
+      onChange: (v) => {
+        p.filter2Cutoff = v;
+        this._liveUpdate();
+      },
+    });
+    this._mk(filt2, {
+      label: 'RESO/Q',
+      min: 0.05,
+      max: 24,
+      value: p.filter2Resonance,
+      default: 1,
+      log: true,
+      formatter: (v) => v.toFixed(2),
+      onChange: (v) => {
+        p.filter2Resonance = v;
+        this._liveUpdate();
+      },
+    });
+    this._mk(filt2, {
+      label: 'ENV DEPTH',
+      min: -6000,
+      max: 6000,
+      value: p.filter2EnvDepth,
+      default: 0,
+      step: 10,
+      formatter: (v) => Math.round(v) + 'Hz',
+      onChange: (v) => {
+        p.filter2EnvDepth = v;
         this._liveUpdate();
       },
     });

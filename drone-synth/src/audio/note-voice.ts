@@ -36,8 +36,11 @@ export class NoteVoice {
   osc2Src?: OscillatorNode | AudioBufferSourceNode;
   osc2Gain?: GainNode;
   filter: BiquadFilterNode;
+  filter2: BiquadFilterNode;
+  filter2Enabled: boolean;
   fenv: ConstantSourceNode;
   fenvGain: GainNode;
+  fenv2Gain: GainNode;
   amp: GainNode;
   lfo1: LfoState;
   lfo2: LfoState;
@@ -62,21 +65,35 @@ export class NoteVoice {
     filter.Q.value = p.resonance;
     this.filter = filter;
 
-    /* filter envelope (constant source * depth -> filter freq) */
+    /* filter 2 (always instantiated, series after filter 1; bypassed unless filter2Enabled) */
+    const filter2 = ctx.createBiquadFilter();
+    filter2.type = p.filter2Type;
+    filter2.frequency.value = p.filter2Cutoff;
+    filter2.Q.value = p.filter2Resonance;
+    this.filter2 = filter2;
+    this.filter2Enabled = !!p.filter2Enabled;
+
+    /* filter envelope (constant source * depth -> filter freq), shared shape, independent depth per filter */
     const fenv = ctx.createConstantSource();
     const fenvGain = ctx.createGain();
     fenvGain.gain.value = p.envDepth;
     fenv.connect(fenvGain).connect(filter.frequency);
+    const fenv2Gain = ctx.createGain();
+    fenv2Gain.gain.value = p.filter2EnvDepth;
+    fenv.connect(fenv2Gain).connect(filter2.frequency);
     fenv.start();
     this.fenv = fenv;
     this.fenvGain = fenvGain;
+    this.fenv2Gain = fenv2Gain;
 
     /* amp envelope */
     const amp = ctx.createGain();
     amp.gain.value = 0;
     this.amp = amp;
 
-    src.connect(filter).connect(amp).connect(voice.bus);
+    src.connect(filter);
+    this._connectFilterChain(this.filter2Enabled);
+    amp.connect(voice.bus);
     src.start();
 
     /* Dual LFOs */
@@ -156,6 +173,25 @@ export class NoteVoice {
     this.osc2Src = undefined;
     this.osc2Gain = undefined;
     this._reconnectLfoTargets();
+  }
+
+  private _connectFilterChain(filter2Enabled: boolean): void {
+    try {
+      this.filter.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+    try {
+      this.filter2.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+    if (filter2Enabled) {
+      this.filter.connect(this.filter2);
+      this.filter2.connect(this.amp);
+    } else {
+      this.filter.connect(this.amp);
+    }
   }
 
   private _reconnectLfoTargets(): void {
@@ -246,6 +282,14 @@ export class NoteVoice {
     this.filter.frequency.setTargetAtTime(p.cutoff, now, 0.03);
     this.filter.Q.setTargetAtTime(p.resonance, now, 0.03);
     this.fenvGain.gain.setTargetAtTime(p.envDepth, now, 0.03);
+    this.filter2.type = p.filter2Type;
+    this.filter2.frequency.setTargetAtTime(p.filter2Cutoff, now, 0.03);
+    this.filter2.Q.setTargetAtTime(p.filter2Resonance, now, 0.03);
+    this.fenv2Gain.gain.setTargetAtTime(p.filter2EnvDepth, now, 0.03);
+    if (!!p.filter2Enabled !== this.filter2Enabled) {
+      this.filter2Enabled = !!p.filter2Enabled;
+      this._connectFilterChain(this.filter2Enabled);
+    }
     if (this.lfo1.target !== p.lfoTarget) this._connectLfoTarget(this.lfo1, p.lfoTarget);
     this._applyLfoSettings(this.lfo1, readLfoSettings(p, 'lfo'));
     this._setLfoRate(this.lfo1, readLfoSettings(p, 'lfo'));
@@ -332,7 +376,19 @@ export class NoteVoice {
   private _cleanup(): void {
     Engine.syncedLfos.delete(this.lfo1.syncEntry);
     Engine.syncedLfos.delete(this.lfo2.syncEntry);
-    const nodes: AudioNode[] = [this.src, this.filter, this.amp, this.fenv, this.fenvGain, this.lfo1.lfo, this.lfo1.depth, this.lfo2.lfo, this.lfo2.depth];
+    const nodes: AudioNode[] = [
+      this.src,
+      this.filter,
+      this.filter2,
+      this.amp,
+      this.fenv,
+      this.fenvGain,
+      this.fenv2Gain,
+      this.lfo1.lfo,
+      this.lfo1.depth,
+      this.lfo2.lfo,
+      this.lfo2.depth,
+    ];
     if (this.osc2Src) nodes.push(this.osc2Src);
     if (this.osc2Gain) nodes.push(this.osc2Gain);
     nodes.forEach((n) => {
