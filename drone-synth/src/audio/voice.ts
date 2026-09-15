@@ -1,7 +1,7 @@
 import { Knob, type KnobOptions } from '../ui/knob';
 import { DEFAULT_VOICE_PARAMS, FX_KEYS, FX_LABELS, LFO_DIVISIONS } from '../constants';
 import { cloneData, nextId } from '../utils/dsp';
-import type { FxKey, VoiceParams } from '../types';
+import type { FxKey, OscType, VoiceParams } from '../types';
 import { scheduleAutoSave } from '../persistence';
 import { removeVoice, voices } from '../voices';
 import { Engine } from './engine';
@@ -779,86 +779,99 @@ export class Voice {
 
   private _renderOscKnobs(): void {
     const p = this.params;
-    const container = this.panelEl.querySelector<HTMLElement>('[data-group="osc-knobs"]')!;
-    container.innerHTML = '';
-    this.panelEl.querySelector<HTMLSelectElement>('[data-p="osc"]')!.value = p.osc;
-    this._mk(container, {
-      label: 'PITCH',
-      min: -24,
-      max: 24,
-      value: p.pitch,
-      default: 0,
-      step: 0.5,
-      size: 52,
-      formatter: (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}st`,
-      onChange: (v) => {
-        p.pitch = v;
-        this._liveUpdate();
-      },
-    });
-    if (p.osc === 'pulse') {
-      this._mk(container, {
-        label: 'WIDTH',
-        min: 0.02,
-        max: 0.98,
-        value: p.pulseWidth,
-        default: 0.5,
-        step: 0.01,
-        size: 52,
-        formatter: (v) => Math.round(v * 100) + '%',
-        onChange: (v) => {
+    this._renderOscKnobsInto(
+      this.panelEl.querySelector<HTMLElement>('[data-group="osc-knobs"]')!,
+      '[data-p="osc"]',
+      {
+        oscType: p.osc,
+        pitch: p.pitch,
+        pulseWidth: p.pulseWidth,
+        setPitch: (v) => {
+          p.pitch = v;
+          this._liveUpdate();
+        },
+        setPulseWidth: (v) => {
           p.pulseWidth = v;
         },
-      });
-    }
+      },
+    );
   }
 
   private _renderOsc2Knobs(): void {
     const p = this.params;
-    const container = this.panelEl.querySelector<HTMLElement>('[data-group="osc2-knobs"]')!;
+    this._renderOscKnobsInto(
+      this.panelEl.querySelector<HTMLElement>('[data-group="osc2-knobs"]')!,
+      '[data-p="osc2"]',
+      {
+        oscType: p.osc2,
+        pitch: p.osc2Pitch,
+        pulseWidth: p.osc2PulseWidth,
+        level: p.osc2Level,
+        setPitch: (v) => {
+          p.osc2Pitch = v;
+          this._liveUpdate();
+        },
+        setPulseWidth: (v) => {
+          p.osc2PulseWidth = v;
+        },
+        setLevel: (v) => {
+          p.osc2Level = v;
+          this._liveUpdate();
+        },
+      },
+    );
+  }
+
+  private _renderOscKnobsInto(
+    container: HTMLElement,
+    selectSelector: string,
+    accessors: {
+      oscType: OscType;
+      pitch: number;
+      pulseWidth: number;
+      level?: number;
+      setPitch: (v: number) => void;
+      setPulseWidth: (v: number) => void;
+      setLevel?: (v: number) => void;
+    },
+  ): void {
     container.innerHTML = '';
-    this.panelEl.querySelector<HTMLSelectElement>('[data-p="osc2"]')!.value = p.osc2;
+    this.panelEl.querySelector<HTMLSelectElement>(selectSelector)!.value = accessors.oscType;
     this._mk(container, {
       label: 'PITCH',
       min: -24,
       max: 24,
-      value: p.osc2Pitch,
+      value: accessors.pitch,
       default: 0,
       step: 0.5,
       size: 52,
       formatter: (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}st`,
-      onChange: (v) => {
-        p.osc2Pitch = v;
-        this._liveUpdate();
-      },
+      onChange: (v) => accessors.setPitch(v),
     });
-    this._mk(container, {
-      label: 'LEVEL',
-      min: 0,
-      max: 1,
-      value: p.osc2Level,
-      default: 0,
-      step: 0.01,
-      size: 52,
-      formatter: (v) => Math.round(v * 100) + '%',
-      onChange: (v) => {
-        p.osc2Level = v;
-        this._liveUpdate();
-      },
-    });
-    if (p.osc2 === 'pulse') {
+    if (accessors.setLevel) {
+      this._mk(container, {
+        label: 'LEVEL',
+        min: 0,
+        max: 1,
+        value: accessors.level ?? 0,
+        default: 0,
+        step: 0.01,
+        size: 52,
+        formatter: (v) => Math.round(v * 100) + '%',
+        onChange: (v) => accessors.setLevel!(v),
+      });
+    }
+    if (accessors.oscType === 'pulse') {
       this._mk(container, {
         label: 'WIDTH',
         min: 0.02,
         max: 0.98,
-        value: p.osc2PulseWidth,
+        value: accessors.pulseWidth,
         default: 0.5,
         step: 0.01,
         size: 52,
         formatter: (v) => Math.round(v * 100) + '%',
-        onChange: (v) => {
-          p.osc2PulseWidth = v;
-        },
+        onChange: (v) => accessors.setPulseWidth(v),
       });
     }
   }
