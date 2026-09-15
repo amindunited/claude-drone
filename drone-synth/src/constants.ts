@@ -22,6 +22,9 @@ export const LFO_DIVISIONS: LfoDivision[] = [
 ];
 
 export const DEFAULT_VOICE_PARAMS: VoiceParams = {
+  noteOffsetMode: 'seconds',
+  noteOffsetSeconds: 0,
+  noteOffsetDivision: 1,
   osc: 'sine',
   pulseWidth: 0.5,
   pitch: 0,

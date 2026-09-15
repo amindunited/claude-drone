@@ -13,6 +13,9 @@ export interface VoiceSends {
 }
 
 export interface VoiceParams {
+  noteOffsetMode: 'seconds' | 'sync';
+  noteOffsetSeconds: number;
+  noteOffsetDivision: number;
   osc: OscType;
   pulseWidth: number;
   pitch: number;

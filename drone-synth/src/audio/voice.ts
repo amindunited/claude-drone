@@ -12,6 +12,7 @@ export class Voice {
   name: string;
   enabled: boolean;
   activeNotes = new Map<number, NoteVoice>();
+  pendingNotes = new Map<number, number>();
   params: VoiceParams;
 
   bus: GainNode;
@@ -24,6 +25,7 @@ export class Voice {
 
   private _lfoRateKnob: Knob | null = null;
   private _lfoRateKnob2: Knob | null = null;
+  private _noteOffsetSecondsKnob: Knob | null = null;
 
   constructor(name: string, preset: Partial<VoiceParams> | undefined, enabled: boolean | undefined) {
     this.id = nextId();
@@ -51,8 +53,21 @@ export class Voice {
 
   noteOn(note: number, velocity: number): void {
     if (!this.enabled) return;
+    this._cancelPending(note);
     if (this.activeNotes.has(note)) {
       this.activeNotes.get(note)!.forceStop();
+      this.activeNotes.delete(note);
+    }
+    const offsetSeconds = this._resolveNoteOffsetSeconds();
+    if (offsetSeconds > 0) {
+      const timer = window.setTimeout(() => {
+        this.pendingNotes.delete(note);
+        const nv = new NoteVoice(this, note, velocity);
+        this.activeNotes.set(note, nv);
+        this._ledUpdate();
+      }, offsetSeconds * 1000);
+      this.pendingNotes.set(note, timer);
+      return;
     }
     const nv = new NoteVoice(this, note, velocity);
     this.activeNotes.set(note, nv);
@@ -60,6 +75,10 @@ export class Voice {
   }
 
   noteOff(note: number): void {
+    if (this._cancelPending(note)) {
+      this._ledUpdate();
+      return;
+    }
     const nv = this.activeNotes.get(note);
     if (nv) {
       nv.release();
@@ -69,9 +88,27 @@ export class Voice {
   }
 
   allNotesOff(): void {
+    this.pendingNotes.forEach((timer) => window.clearTimeout(timer));
+    this.pendingNotes.clear();
     this.activeNotes.forEach((nv) => nv.forceStop());
     this.activeNotes.clear();
     this._ledUpdate();
+  }
+
+  private _cancelPending(note: number): boolean {
+    const timer = this.pendingNotes.get(note);
+    if (timer === undefined) return false;
+    window.clearTimeout(timer);
+    this.pendingNotes.delete(note);
+    return true;
+  }
+
+  private _resolveNoteOffsetSeconds(): number {
+    const p = this.params;
+    if (p.noteOffsetMode === 'sync') {
+      return 1 / Engine.divisionHz(p.noteOffsetDivision);
+    }
+    return Math.max(0, p.noteOffsetSeconds);
   }
 
   private _ledUpdate(): void {
@@ -125,6 +162,52 @@ export class Voice {
     btn.classList.toggle('off', !on);
   }
 
+  /** Populates a tempo-division <select> (from LFO_DIVISIONS) and wires its change handler. */
+  private _wireDivisionSelect(selector: string, get: () => number, set: (v: number) => void, onChange?: () => void): void {
+    const sel = this.panelEl.querySelector<HTMLSelectElement>(selector)!;
+    LFO_DIVISIONS.forEach((d) => {
+      const o = document.createElement('option');
+      o.value = String(d.beats);
+      o.textContent = d.label;
+      sel.appendChild(o);
+    });
+    sel.value = String(get());
+    sel.addEventListener('change', (e) => {
+      set(parseFloat((e.target as HTMLSelectElement).value));
+      if (onChange) onChange();
+      scheduleAutoSave();
+    });
+  }
+
+  /** Wires a seconds/hz-vs-sync `.toggle-pill` group: paints active state, shows/hides the division select and rate knob. */
+  private _wireRateModeToggle(opts: {
+    toggleGroup: string;
+    syncSelectGroup: string;
+    knob: () => Knob | null;
+    get: () => string;
+    set: (mode: string) => void;
+    onChange?: () => void;
+  }): () => void {
+    const toggleWrap = this.panelEl.querySelector<HTMLElement>(`[data-group="${opts.toggleGroup}"]`)!;
+    const syncSelectWrap = this.panelEl.querySelector<HTMLElement>(`[data-group="${opts.syncSelectGroup}"]`)!;
+    const paint = () => {
+      const mode = opts.get();
+      toggleWrap.querySelectorAll<HTMLButtonElement>('.toggle-pill').forEach((b) => b.classList.toggle('active', b.dataset.rate === mode));
+      syncSelectWrap.style.display = mode === 'sync' ? 'flex' : 'none';
+      const knob = opts.knob();
+      if (knob) knob.el.style.display = mode === 'sync' ? 'none' : 'flex';
+    };
+    toggleWrap.querySelectorAll<HTMLButtonElement>('.toggle-pill').forEach((b) => {
+      b.addEventListener('click', () => {
+        opts.set(b.dataset.rate!);
+        paint();
+        if (opts.onChange) opts.onChange();
+        scheduleAutoSave();
+      });
+    });
+    return paint;
+  }
+
   private _buildPanel(): void {
     const p = this.params;
     const panel = document.createElement('div');
@@ -166,6 +249,18 @@ export class Voice {
             </select>
           </div>
           <div class="knob-grid n2" data-group="osc2-knobs"></div>
+        </div>
+
+        <div class="section" data-section="noteOffset">
+          <p class="section-label">Note Offset</p>
+          <div class="toggle-row" data-group="noteoffset-toggle">
+            <button class="toggle-pill" data-rate="seconds">Sec</button>
+            <button class="toggle-pill" data-rate="sync">Sync</button>
+          </div>
+          <div class="row-select" data-group="noteoffset-sync-select" style="display:none;">
+            <select class="control" data-p="noteOffsetDivision"></select>
+          </div>
+          <div class="knob-grid" data-group="noteoffset-knobs"></div>
         </div>
 
         <div class="section">
@@ -325,6 +420,20 @@ export class Voice {
       this._liveUpdate();
       scheduleAutoSave();
     });
+    this._wireDivisionSelect(
+      '[data-p="noteOffsetDivision"]',
+      () => p.noteOffsetDivision,
+      (v) => (p.noteOffsetDivision = v),
+    );
+
+    const paintNoteOffsetToggle = this._wireRateModeToggle({
+      toggleGroup: 'noteoffset-toggle',
+      syncSelectGroup: 'noteoffset-sync-select',
+      knob: () => this._noteOffsetSecondsKnob,
+      get: () => p.noteOffsetMode,
+      set: (mode) => (p.noteOffsetMode = mode as VoiceParams['noteOffsetMode']),
+    });
+
     const targetSel = panel.querySelector<HTMLSelectElement>('[data-p="lfoTarget"]')!;
     targetSel.value = p.lfoTarget;
     targetSel.addEventListener('change', (e) => {
@@ -340,55 +449,34 @@ export class Voice {
       scheduleAutoSave();
     });
 
-    const divSel = panel.querySelector<HTMLSelectElement>('[data-p="lfoRateDivision"]')!;
-    LFO_DIVISIONS.forEach((d) => {
-      const o = document.createElement('option');
-      o.value = String(d.beats);
-      o.textContent = d.label;
-      divSel.appendChild(o);
-    });
-    divSel.value = String(p.lfoRateDivision);
-    divSel.addEventListener('change', (e) => {
-      p.lfoRateDivision = parseFloat((e.target as HTMLSelectElement).value);
-      this._liveUpdate();
-      scheduleAutoSave();
-    });
+    this._wireDivisionSelect(
+      '[data-p="lfoRateDivision"]',
+      () => p.lfoRateDivision,
+      (v) => (p.lfoRateDivision = v),
+      () => this._liveUpdate(),
+    );
 
-    const divSel2 = panel.querySelector<HTMLSelectElement>('[data-p="lfo2RateDivision"]')!;
-    LFO_DIVISIONS.forEach((d) => {
-      const o = document.createElement('option');
-      o.value = String(d.beats);
-      o.textContent = d.label;
-      divSel2.appendChild(o);
-    });
-    divSel2.value = String(p.lfo2RateDivision);
-    divSel2.addEventListener('change', (e) => {
-      p.lfo2RateDivision = parseFloat((e.target as HTMLSelectElement).value);
-      this._liveUpdate();
-      scheduleAutoSave();
-    });
+    this._wireDivisionSelect(
+      '[data-p="lfo2RateDivision"]',
+      () => p.lfo2RateDivision,
+      (v) => (p.lfo2RateDivision = v),
+      () => this._liveUpdate(),
+    );
 
-    const rateToggleWrap = panel.querySelector<HTMLElement>('[data-group="lforate-toggle"]')!;
-    const syncSelectWrap = panel.querySelector<HTMLElement>('[data-group="lfo-sync-select"]')!;
     const lfoSection = panel.querySelector<HTMLElement>('[data-section="lfo"]')!;
     const lfoToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-lfo"]')!;
-    const paintRateToggle = () => {
-      rateToggleWrap.querySelectorAll<HTMLButtonElement>('.toggle-pill').forEach((b) => b.classList.toggle('active', b.dataset.rate === p.lfoRateMode));
-      syncSelectWrap.style.display = p.lfoRateMode === 'sync' ? 'flex' : 'none';
-      if (this._lfoRateKnob) this._lfoRateKnob.el.style.display = p.lfoRateMode === 'sync' ? 'none' : 'flex';
-    };
     lfoToggleBtn.addEventListener('click', () => {
       const collapsed = lfoSection.classList.toggle('collapsed');
       lfoSection.classList.toggle('expanded', !collapsed);
       lfoToggleBtn.setAttribute('aria-expanded', String(!collapsed));
     });
-    rateToggleWrap.querySelectorAll<HTMLButtonElement>('.toggle-pill').forEach((b) => {
-      b.addEventListener('click', () => {
-        p.lfoRateMode = b.dataset.rate as VoiceParams['lfoRateMode'];
-        paintRateToggle();
-        this._liveUpdate();
-        scheduleAutoSave();
-      });
+    const paintRateToggle = this._wireRateModeToggle({
+      toggleGroup: 'lforate-toggle',
+      syncSelectGroup: 'lfo-sync-select',
+      knob: () => this._lfoRateKnob,
+      get: () => p.lfoRateMode,
+      set: (mode) => (p.lfoRateMode = mode as VoiceParams['lfoRateMode']),
+      onChange: () => this._liveUpdate(),
     });
 
     const lfo2ToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-lfo2-enable"]')!;
@@ -401,29 +489,20 @@ export class Voice {
     });
     paintLfo2Enabled();
 
-    const rateToggleWrap2 = panel.querySelector<HTMLElement>('[data-group="lfo2rate-toggle"]')!;
-    const syncSelectWrap2 = panel.querySelector<HTMLElement>('[data-group="lfo2-sync-select"]')!;
     const lfoSection2 = panel.querySelector<HTMLElement>('[data-section="lfo2"]')!;
     const lfoToggleBtn2 = panel.querySelector<HTMLButtonElement>('[data-act="toggle-lfo2"]')!;
-    const paintRateToggle2 = () => {
-      rateToggleWrap2
-        .querySelectorAll<HTMLButtonElement>('.toggle-pill')
-        .forEach((b) => b.classList.toggle('active', b.dataset.rate === p.lfo2RateMode));
-      syncSelectWrap2.style.display = p.lfo2RateMode === 'sync' ? 'flex' : 'none';
-      if (this._lfoRateKnob2) this._lfoRateKnob2.el.style.display = p.lfo2RateMode === 'sync' ? 'none' : 'flex';
-    };
     lfoToggleBtn2.addEventListener('click', () => {
       const collapsed = lfoSection2.classList.toggle('collapsed');
       lfoSection2.classList.toggle('expanded', !collapsed);
       lfoToggleBtn2.setAttribute('aria-expanded', String(!collapsed));
     });
-    rateToggleWrap2.querySelectorAll<HTMLButtonElement>('.toggle-pill').forEach((b) => {
-      b.addEventListener('click', () => {
-        p.lfo2RateMode = b.dataset.rate as VoiceParams['lfo2RateMode'];
-        paintRateToggle2();
-        this._liveUpdate();
-        scheduleAutoSave();
-      });
+    const paintRateToggle2 = this._wireRateModeToggle({
+      toggleGroup: 'lfo2rate-toggle',
+      syncSelectGroup: 'lfo2-sync-select',
+      knob: () => this._lfoRateKnob2,
+      get: () => p.lfo2RateMode,
+      set: (mode) => (p.lfo2RateMode = mode as VoiceParams['lfo2RateMode']),
+      onChange: () => this._liveUpdate(),
     });
 
     /* header buttons */
@@ -447,6 +526,21 @@ export class Voice {
     /* knobs */
     this._renderOscKnobs();
     this._renderOsc2Knobs();
+
+    const noteOffsetK = panel.querySelector<HTMLElement>('[data-group="noteoffset-knobs"]')!;
+    this._noteOffsetSecondsKnob = this._mk(noteOffsetK, {
+      label: 'OFFSET',
+      min: 0,
+      max: 2,
+      value: p.noteOffsetSeconds,
+      default: 0,
+      step: 0.01,
+      formatter: (v) => v.toFixed(2) + 's',
+      onChange: (v) => {
+        p.noteOffsetSeconds = v;
+      },
+    });
+    paintNoteOffsetToggle();
 
     const adsr = panel.querySelector<HTMLElement>('[data-group="adsr"]')!;
     this._mk(adsr, {
