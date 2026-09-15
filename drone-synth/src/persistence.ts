@@ -91,6 +91,10 @@ export function normalizeVoiceSettings(voice: unknown, index: number): VoiceConf
   };
   const params = Object.assign({}, DEFAULT_VOICE_PARAMS, sourceParams) as VoiceParams;
   params.sends = Object.assign({}, DEFAULT_VOICE_PARAMS.sends, sourceParams.sends || {});
+  if (sourceParams.lfo2Enabled === undefined) {
+    // Presets saved before lfo2Enabled existed relied on lfo2Target !== 'none' to mean "in use".
+    params.lfo2Enabled = params.lfo2Target !== 'none';
+  }
   return {
     name: typeof source.name === 'string' && source.name.trim() ? source.name.trim() : `Voice ${index + 1}`,
     enabled: source.enabled !== undefined ? !!source.enabled : true,

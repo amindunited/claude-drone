@@ -48,6 +48,7 @@ export const DEFAULT_VOICE_PARAMS: VoiceParams = {
   lfoRateHz: 2,
   lfoRateDivision: 4,
   lfoDepth: 0.3,
+  lfo2Enabled: false,
   lfo2Target: 'none',
   lfo2RateMode: 'hz',
   lfo2RateHz: 0.5,

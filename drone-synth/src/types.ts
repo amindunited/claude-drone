@@ -39,6 +39,7 @@ export interface VoiceParams {
   lfoRateHz: number;
   lfoRateDivision: number;
   lfoDepth: number;
+  lfo2Enabled: boolean;
   lfo2Target: LfoTarget;
   lfo2RateMode: LfoRateMode;
   lfo2RateHz: number;

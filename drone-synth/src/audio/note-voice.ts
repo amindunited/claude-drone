@@ -43,7 +43,7 @@ export class NoteVoice {
   fenv2Gain: GainNode;
   amp: GainNode;
   lfo1: LfoState;
-  lfo2: LfoState;
+  lfo2: LfoState | null;
 
   constructor(voice: Voice, note: number, velocity: number) {
     const ctx = Engine.ctx!,
@@ -96,9 +96,9 @@ export class NoteVoice {
     amp.connect(voice.bus);
     src.start();
 
-    /* Dual LFOs */
+    /* Dual LFOs (LFO2 only allocated when explicitly enabled) */
     this.lfo1 = this._createLfo('lfo', p);
-    this.lfo2 = this._createLfo('lfo2', p);
+    this.lfo2 = p.lfo2Enabled ? this._createLfo('lfo2', p) : null;
 
     /* optional second oscillator (VCO2), mixed into the same filter/LFO chain as VCO1 */
     if (p.osc2Enabled) {
@@ -196,7 +196,7 @@ export class NoteVoice {
 
   private _reconnectLfoTargets(): void {
     this._connectLfoTarget(this.lfo1, this.lfo1.target ?? 'none');
-    this._connectLfoTarget(this.lfo2, this.lfo2.target ?? 'none');
+    if (this.lfo2) this._connectLfoTarget(this.lfo2, this.lfo2.target ?? 'none');
   }
 
   private _createLfo(slot: LfoSlot, p: VoiceParams): LfoState {
@@ -243,6 +243,27 @@ export class NoteVoice {
     else if (settings.target === 'filter' || settings.target === 'filter2') depthVal = settings.depth * 4000; // Hz
     else if (settings.target === 'amplitude') depthVal = settings.depth * 0.5; // gain
     state.depth.gain.setTargetAtTime(depthVal, Engine.ctx!.currentTime, 0.03);
+  }
+
+  private _teardownLfo2(): void {
+    if (!this.lfo2) return;
+    Engine.syncedLfos.delete(this.lfo2.syncEntry);
+    try {
+      this.lfo2.lfo.stop();
+    } catch {
+      /* already stopped */
+    }
+    try {
+      this.lfo2.lfo.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+    try {
+      this.lfo2.depth.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+    this.lfo2 = null;
   }
 
   private _setLfoRate(state: LfoState, settings: LfoSettings): void {
@@ -295,9 +316,18 @@ export class NoteVoice {
     if (this.lfo1.target !== p.lfoTarget) this._connectLfoTarget(this.lfo1, p.lfoTarget);
     this._applyLfoSettings(this.lfo1, readLfoSettings(p, 'lfo'));
     this._setLfoRate(this.lfo1, readLfoSettings(p, 'lfo'));
-    if (this.lfo2.target !== p.lfo2Target) this._connectLfoTarget(this.lfo2, p.lfo2Target);
-    this._applyLfoSettings(this.lfo2, readLfoSettings(p, 'lfo2'));
-    this._setLfoRate(this.lfo2, readLfoSettings(p, 'lfo2'));
+    if (!!p.lfo2Enabled !== !!this.lfo2) {
+      if (p.lfo2Enabled) {
+        this.lfo2 = this._createLfo('lfo2', p);
+      } else {
+        this._teardownLfo2();
+      }
+    }
+    if (this.lfo2) {
+      if (this.lfo2.target !== p.lfo2Target) this._connectLfoTarget(this.lfo2, p.lfo2Target);
+      this._applyLfoSettings(this.lfo2, readLfoSettings(p, 'lfo2'));
+      this._setLfoRate(this.lfo2, readLfoSettings(p, 'lfo2'));
+    }
   }
 
   release(): void {
@@ -331,10 +361,12 @@ export class NoteVoice {
     } catch {
       /* already stopped */
     }
-    try {
-      this.lfo2.lfo.stop(stopAt);
-    } catch {
-      /* already stopped */
+    if (this.lfo2) {
+      try {
+        this.lfo2.lfo.stop(stopAt);
+      } catch {
+        /* already stopped */
+      }
     }
     try {
       this.fenv.stop(stopAt);
@@ -362,10 +394,12 @@ export class NoteVoice {
     } catch {
       /* already stopped */
     }
-    try {
-      this.lfo2.lfo.stop();
-    } catch {
-      /* already stopped */
+    if (this.lfo2) {
+      try {
+        this.lfo2.lfo.stop();
+      } catch {
+        /* already stopped */
+      }
     }
     try {
       this.fenv.stop();
@@ -377,7 +411,7 @@ export class NoteVoice {
 
   private _cleanup(): void {
     Engine.syncedLfos.delete(this.lfo1.syncEntry);
-    Engine.syncedLfos.delete(this.lfo2.syncEntry);
+    if (this.lfo2) Engine.syncedLfos.delete(this.lfo2.syncEntry);
     const nodes: AudioNode[] = [
       this.src,
       this.filter,
@@ -388,9 +422,8 @@ export class NoteVoice {
       this.fenv2Gain,
       this.lfo1.lfo,
       this.lfo1.depth,
-      this.lfo2.lfo,
-      this.lfo2.depth,
     ];
+    if (this.lfo2) nodes.push(this.lfo2.lfo, this.lfo2.depth);
     if (this.osc2Src) nodes.push(this.osc2Src);
     if (this.osc2Gain) nodes.push(this.osc2Gain);
     nodes.forEach((n) => {

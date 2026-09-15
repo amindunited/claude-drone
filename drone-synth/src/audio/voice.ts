@@ -117,8 +117,12 @@ export class Voice {
 
   private _paintEnabled(): void {
     if (!this.enableBtn) return;
-    this.enableBtn.classList.toggle('on', this.enabled);
-    this.enableBtn.classList.toggle('off', !this.enabled);
+    this._paintToggle(this.enableBtn, this.enabled);
+  }
+
+  private _paintToggle(btn: HTMLButtonElement, on: boolean): void {
+    btn.classList.toggle('on', on);
+    btn.classList.toggle('off', !on);
   }
 
   private _buildPanel(): void {
@@ -226,9 +230,12 @@ export class Voice {
         </div>
 
         <div class="section collapsible collapsed" data-section="lfo2">
-          <button type="button" class="section-label section-toggle" data-act="toggle-lfo2" aria-expanded="false">
-            LFO 2 / Modulation <span class="chev">▾</span>
-          </button>
+          <div class="section-label-row">
+            <button class="icon-btn toggle off" title="Enable/disable LFO 2" data-act="toggle-lfo2-enable">●</button>
+            <button type="button" class="section-label section-toggle" data-act="toggle-lfo2" aria-expanded="false">
+              LFO 2 / Modulation <span class="chev">▾</span>
+            </button>
+          </div>
           <div class="section-content">
             <div class="row-select">
               <select class="control" data-p="lfo2Target">
@@ -271,10 +278,7 @@ export class Voice {
       scheduleAutoSave();
     });
     const osc2ToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-osc2"]')!;
-    const paintOsc2Enabled = () => {
-      osc2ToggleBtn.classList.toggle('on', p.osc2Enabled);
-      osc2ToggleBtn.classList.toggle('off', !p.osc2Enabled);
-    };
+    const paintOsc2Enabled = () => this._paintToggle(osc2ToggleBtn, p.osc2Enabled);
     osc2ToggleBtn.addEventListener('click', () => {
       p.osc2Enabled = !p.osc2Enabled;
       paintOsc2Enabled();
@@ -299,10 +303,7 @@ export class Voice {
     });
 
     const filter2ToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-filter2"]')!;
-    const paintFilter2Enabled = () => {
-      filter2ToggleBtn.classList.toggle('on', p.filter2Enabled);
-      filter2ToggleBtn.classList.toggle('off', !p.filter2Enabled);
-    };
+    const paintFilter2Enabled = () => this._paintToggle(filter2ToggleBtn, p.filter2Enabled);
     filter2ToggleBtn.addEventListener('click', () => {
       p.filter2Enabled = !p.filter2Enabled;
       paintFilter2Enabled();
@@ -389,6 +390,16 @@ export class Voice {
         scheduleAutoSave();
       });
     });
+
+    const lfo2ToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-lfo2-enable"]')!;
+    const paintLfo2Enabled = () => this._paintToggle(lfo2ToggleBtn, p.lfo2Enabled);
+    lfo2ToggleBtn.addEventListener('click', () => {
+      p.lfo2Enabled = !p.lfo2Enabled;
+      paintLfo2Enabled();
+      this._liveUpdate();
+      scheduleAutoSave();
+    });
+    paintLfo2Enabled();
 
     const rateToggleWrap2 = panel.querySelector<HTMLElement>('[data-group="lfo2rate-toggle"]')!;
     const syncSelectWrap2 = panel.querySelector<HTMLElement>('[data-group="lfo2-sync-select"]')!;
