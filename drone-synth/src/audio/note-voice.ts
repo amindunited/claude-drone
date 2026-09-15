@@ -1,4 +1,4 @@
-import { clamp, noiseBuffer, noteToFreq, pulseWave } from '../utils/dsp';
+import { clamp, deriveNoiseBuffer, noiseBuffer, noteToFreq, pulseWave } from '../utils/dsp';
 import type { LfoRateMode, LfoTarget, OscType, VoiceParams } from '../types';
 import { Engine, type SyncedLfoEntry } from './engine';
 import type { Voice } from './voice';
@@ -120,22 +120,42 @@ export class NoteVoice {
     fenv.offset.linearRampToValueAtTime(p.sustain, now + p.attack + Math.max(0.002, p.decay));
   }
 
+  /** first noise buffer generated for this voice; later noise requests derive from it instead of re-rolling randomness */
+  private _noiseSeed?: AudioBuffer;
+  /** last periodic wave generated for this voice, reused when a second oscillator asks for the same duty cycle */
+  private _pulseWaveCache?: { duty: number; wave: PeriodicWave };
+
   private _createOscSource(type: OscType, pulseWidth: number, freq: number): OscillatorNode | AudioBufferSourceNode {
     const ctx = Engine.ctx!;
     if (type === 'noise') {
       const bufferSrc = ctx.createBufferSource();
-      bufferSrc.buffer = noiseBuffer(ctx);
+      bufferSrc.buffer = this._getNoiseBuffer(ctx);
       bufferSrc.loop = true;
       return bufferSrc;
     }
     const oscSrc = ctx.createOscillator();
     if (type === 'pulse') {
-      oscSrc.setPeriodicWave(pulseWave(ctx, pulseWidth));
+      oscSrc.setPeriodicWave(this._getPulseWave(ctx, pulseWidth));
     } else {
       oscSrc.type = type;
     }
     oscSrc.frequency.value = freq;
     return oscSrc;
+  }
+
+  private _getNoiseBuffer(ctx: BaseAudioContext): AudioBuffer {
+    if (!this._noiseSeed) {
+      this._noiseSeed = noiseBuffer(ctx);
+      return this._noiseSeed;
+    }
+    return deriveNoiseBuffer(ctx, this._noiseSeed);
+  }
+
+  private _getPulseWave(ctx: BaseAudioContext, duty: number): PeriodicWave {
+    if (this._pulseWaveCache && this._pulseWaveCache.duty === duty) return this._pulseWaveCache.wave;
+    const wave = pulseWave(ctx, duty);
+    this._pulseWaveCache = { duty, wave };
+    return wave;
   }
 
   private _addOsc2(p: VoiceParams): void {

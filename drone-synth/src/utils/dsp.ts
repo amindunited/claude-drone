@@ -51,6 +51,24 @@ export function noiseBuffer(ctx: BaseAudioContext): AudioBuffer {
   return buf;
 }
 
+/**
+ * Derives a second noise buffer from an already-generated one without calling
+ * Math.random() again: same samples, read starting from the opposite half of
+ * the buffer, so two loop points playing `source` and this derived buffer at
+ * the same instant never hit the same sample. Lets a dual-oscillator voice
+ * get two independent-sounding noise sources for the cost of one RNG fill.
+ */
+export function deriveNoiseBuffer(ctx: BaseAudioContext, source: AudioBuffer): AudioBuffer {
+  const src = source.getChannelData(0);
+  const len = src.length;
+  const half = len >> 1;
+  const buf = ctx.createBuffer(1, len, source.sampleRate);
+  const d = buf.getChannelData(0);
+  d.set(src.subarray(half));
+  d.set(src.subarray(0, half), len - half);
+  return buf;
+}
+
 export function makeImpulseResponse(ctx: BaseAudioContext, seconds: number, damp: number): AudioBuffer {
   const len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
   const ir = ctx.createBuffer(2, len, ctx.sampleRate);
