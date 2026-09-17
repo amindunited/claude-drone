@@ -11,14 +11,19 @@ export interface LfoDivision {
 export const LFO_DIVISIONS: LfoDivision[] = [
   { label: '1/16', beats: 0.25 },
   { label: '1/8', beats: 0.5 },
+  { label: '1/6', beats: 2 / 3 },
   { label: '1/4', beats: 1 },
+  { label: '1/3', beats: 4 / 3 },
   { label: '1/2', beats: 2 },
   { label: '1 bar', beats: 4 },
   { label: '2 bars', beats: 8 },
   { label: '4 bars', beats: 16 },
+  { label: '6 bars', beats: 24 },
   { label: '8 bars', beats: 32 },
   { label: '16 bars', beats: 64 },
+  { label: '24 bars', beats: 96 },
   { label: '32 bars', beats: 128 },
+  { label: '64 bars', beats: 256 },
 ];
 
 export const DEFAULT_VOICE_PARAMS: VoiceParams = {
