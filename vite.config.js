@@ -3,7 +3,24 @@ import { resolve } from 'path';
 
 const isProd = true; // import.meta.env?.PROD;
 
+// drone-synth.html lives in the drone-synth/ workspace, so in dev the root
+// server can't serve it. Redirect to that package's dev server instead
+// (start it with `npm run dev:strata`).
+const droneSynthDevRedirect = {
+  name: 'drone-synth-dev-redirect',
+  apply: 'serve',
+  configureServer(server) {
+    server.middlewares.use((req, res, next) => {
+      if (req.url?.split('?')[0] !== '/claude-drone/drone-synth.html') return next();
+      res.statusCode = 302;
+      res.setHeader('Location', 'http://localhost:5174/claude-drone/drone-synth.html');
+      res.end();
+    });
+  },
+};
+
 export default defineConfig({
+  plugins: [droneSynthDevRedirect],
   root: './src',
   base: isProd ? '/claude-drone/' : '/',
   build: {

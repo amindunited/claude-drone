@@ -18,7 +18,8 @@ export default defineConfig({
     },
   },
   server: {
-    open: true,
+    // No index.html in this package, so open the real entry page.
+    open: '/claude-drone/drone-synth.html',
     port: 5174,
   },
   css: {
