@@ -12,10 +12,20 @@ export interface VoiceSends {
   reverb: number;
 }
 
+export interface SeqStep {
+  on: boolean;
+  semitones: number;
+}
+
 export interface VoiceParams {
   noteOffsetMode: 'seconds' | 'sync';
   noteOffsetSeconds: number;
   noteOffsetDivision: number;
+  seqEnabled: boolean;
+  seqLength: number;
+  seqDivision: number;
+  /** always SEQ_MAX_STEPS long; seqLength selects how many play */
+  seqSteps: SeqStep[];
   osc: OscType;
   pulseWidth: number;
   pitch: number;

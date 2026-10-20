@@ -4,6 +4,7 @@ import { AppState, PresetState, SettingsUI } from './state';
 import { Engine } from './audio/engine';
 import * as keyboard from './keyboard';
 import { replaceVoices, voices } from './voices';
+import { normalizeSeqLength, normalizeSeqSteps } from './sequencer/steps';
 import type { DelayMode, DelaySettings, FxSettings, GlobalSettings, StoredSettings, SynthSettings, VoiceConfig, VoiceParams, VoiceSends } from './types';
 
 function readStorageJson<T>(key: string, fallback: T): T {
@@ -91,6 +92,11 @@ export function normalizeVoiceSettings(voice: unknown, index: number): VoiceConf
   };
   const params = Object.assign({}, DEFAULT_VOICE_PARAMS, sourceParams) as VoiceParams;
   params.sends = Object.assign({}, DEFAULT_VOICE_PARAMS.sends, sourceParams.sends || {});
+  params.seqSteps = normalizeSeqSteps(sourceParams.seqSteps);
+  params.seqLength = normalizeSeqLength(params.seqLength);
+  params.seqDivision = toNumber(params.seqDivision, DEFAULT_VOICE_PARAMS.seqDivision);
+  if (params.seqDivision <= 0) params.seqDivision = DEFAULT_VOICE_PARAMS.seqDivision;
+  params.seqEnabled = !!params.seqEnabled;
   if (sourceParams.lfo2Enabled === undefined) {
     // Presets saved before lfo2Enabled existed relied on lfo2Target !== 'none' to mean "in use".
     params.lfo2Enabled = params.lfo2Target !== 'none';

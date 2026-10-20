@@ -2,17 +2,23 @@ import { Knob, type KnobOptions } from '../ui/knob';
 import { DEFAULT_VOICE_PARAMS, FX_KEYS, FX_LABELS, LFO_DIVISIONS } from '../constants';
 import { cloneData, nextId } from '../utils/dsp';
 import type { FxKey, OscType, VoiceParams } from '../types';
+import { Sequencer, type SequencedVoice } from '../sequencer/scheduler';
+import { SEQ_MAX_STEPS, SEQ_SEMITONE_RANGE, normalizeSeqSteps, nextBoundaryBeat, stepIndexAt } from '../sequencer/steps';
 import { scheduleAutoSave } from '../persistence';
 import { removeVoice, voices } from '../voices';
 import { Engine } from './engine';
 import { NoteVoice } from './note-voice';
 
-export class Voice {
+export class Voice implements SequencedVoice {
   id: string;
   name: string;
   enabled: boolean;
   activeNotes = new Map<number, NoteVoice>();
   pendingNotes = new Map<number, number>();
+  /** notes currently held (past any note offset) -> velocity; tracked in both plain and sequenced modes */
+  heldNotes = new Map<number, number>();
+  /** sequenced mode: the NoteVoice sounding the current step for each held note */
+  seqNotes = new Map<number, NoteVoice>();
   params: VoiceParams;
 
   bus: GainNode;
@@ -27,12 +33,19 @@ export class Voice {
   private _lfoRateKnob2: Knob | null = null;
   private _noteOffsetSecondsKnob: Knob | null = null;
 
+  private _seqNextBeat: number | null = null;
+  private _seqScheduledDivision = 0;
+  private _seqLastWhen = 0;
+  private _seqPlayheadQueue: { index: number; when: number }[] = [];
+  private _seqStepEls: HTMLElement[] = [];
+
   constructor(name: string, preset: Partial<VoiceParams> | undefined, enabled: boolean | undefined) {
     this.id = nextId();
     this.name = name;
     this.enabled = enabled !== undefined ? !!enabled : true;
     this.params = Object.assign({}, DEFAULT_VOICE_PARAMS, preset || {});
     this.params.sends = Object.assign({}, DEFAULT_VOICE_PARAMS.sends, (preset || {}).sends || {});
+    this.params.seqSteps = normalizeSeqSteps((preset || {}).seqSteps);
 
     const ctx = Engine.ctx!;
     this.bus = ctx.createGain();
@@ -62,16 +75,12 @@ export class Voice {
     if (offsetSeconds > 0) {
       const timer = window.setTimeout(() => {
         this.pendingNotes.delete(note);
-        const nv = new NoteVoice(this, note, velocity);
-        this.activeNotes.set(note, nv);
-        this._ledUpdate();
+        this._startHeldNote(note, velocity);
       }, offsetSeconds * 1000);
       this.pendingNotes.set(note, timer);
       return;
     }
-    const nv = new NoteVoice(this, note, velocity);
-    this.activeNotes.set(note, nv);
-    this._ledUpdate();
+    this._startHeldNote(note, velocity);
   }
 
   noteOff(note: number): void {
@@ -79,20 +88,110 @@ export class Voice {
       this._ledUpdate();
       return;
     }
+    this.heldNotes.delete(note);
     const nv = this.activeNotes.get(note);
     if (nv) {
       nv.release();
       this.activeNotes.delete(note);
     }
+    const seqNv = this.seqNotes.get(note);
+    if (seqNv) {
+      seqNv.release();
+      this.seqNotes.delete(note);
+    }
+    if (this.heldNotes.size === 0) this._stopSequencing();
     this._ledUpdate();
   }
 
   allNotesOff(): void {
     this.pendingNotes.forEach((timer) => window.clearTimeout(timer));
     this.pendingNotes.clear();
+    this.heldNotes.clear();
     this.activeNotes.forEach((nv) => nv.forceStop());
     this.activeNotes.clear();
+    this.seqNotes.forEach((nv) => nv.forceStop());
+    this.seqNotes.clear();
+    this._stopSequencing();
     this._ledUpdate();
+  }
+
+  /** A note that is now "held" (after any note offset): sustain it directly, or hand it to the step sequencer. */
+  private _startHeldNote(note: number, velocity: number): void {
+    this.heldNotes.set(note, velocity);
+    if (this.params.seqEnabled) {
+      Sequencer.register(this);
+    } else {
+      this.activeNotes.set(note, new NoteVoice(this, note, velocity));
+    }
+    this._ledUpdate();
+  }
+
+  private _stopSequencing(): void {
+    Sequencer.unregister(this);
+    this._seqNextBeat = null;
+    this._seqLastWhen = 0;
+    this._seqPlayheadQueue = [];
+    this._paintStepCurrent(-1);
+  }
+
+  /** Switches held notes between plain sustain and sequenced playback when the sequencer is toggled. */
+  private _applySeqEnabled(): void {
+    if (this.params.seqEnabled) {
+      this.activeNotes.forEach((nv) => nv.release());
+      this.activeNotes.clear();
+      if (this.heldNotes.size > 0) Sequencer.register(this);
+    } else {
+      this.seqNotes.forEach((nv) => nv.release());
+      this.seqNotes.clear();
+      this._stopSequencing();
+      this.heldNotes.forEach((vel, note) => this.activeNotes.set(note, new NoteVoice(this, note, vel)));
+    }
+    this._ledUpdate();
+  }
+
+  scheduleSteps(now: number, horizon: number): void {
+    const p = this.params;
+    const div = p.seqDivision;
+    const fellBehind = this._seqNextBeat !== null && Engine.timeAtBeat(this._seqNextBeat) < now - 0.05; // throttled timer (e.g. background tab): skip missed steps rather than burst them
+    if (this._seqNextBeat === null || this._seqScheduledDivision !== div || fellBehind) {
+      // (re)align to the global grid, never re-booking a boundary already scheduled inside the lookahead
+      this._seqNextBeat = nextBoundaryBeat(Engine.beatAt(Math.max(now, this._seqLastWhen + 1e-3)), div);
+      this._seqScheduledDivision = div;
+    }
+    let beat = this._seqNextBeat;
+    while (Engine.timeAtBeat(beat) < horizon) {
+      const when = Math.max(now, Engine.timeAtBeat(beat));
+      const index = stepIndexAt(beat, div, p.seqLength);
+      this._playStep(index, when);
+      this._seqLastWhen = when;
+      this._seqPlayheadQueue.push({ index, when });
+      beat += div;
+    }
+    this._seqNextBeat = beat;
+  }
+
+  private _playStep(index: number, when: number): void {
+    const step = this.params.seqSteps[index];
+    this.heldNotes.forEach((vel, note) => {
+      const prev = this.seqNotes.get(note);
+      if (prev) prev.release(when);
+      if (step && step.on) {
+        this.seqNotes.set(note, new NoteVoice(this, note, vel, when, step.semitones));
+      } else {
+        this.seqNotes.delete(note);
+      }
+    });
+  }
+
+  paintPlayhead(now: number): void {
+    let latest: number | null = null;
+    while (this._seqPlayheadQueue.length && this._seqPlayheadQueue[0].when <= now) {
+      latest = this._seqPlayheadQueue.shift()!.index;
+    }
+    if (latest !== null) {
+      this._paintStepCurrent(latest);
+      if (this.ledEl) this.ledEl.classList.toggle('active', !!this.params.seqSteps[latest]?.on);
+    }
   }
 
   private _cancelPending(note: number): boolean {
@@ -112,11 +211,12 @@ export class Voice {
   }
 
   private _ledUpdate(): void {
-    if (this.ledEl) this.ledEl.classList.toggle('active', this.activeNotes.size > 0);
+    if (this.ledEl) this.ledEl.classList.toggle('active', this.activeNotes.size > 0 || this.seqNotes.size > 0);
   }
 
   private _liveUpdate(): void {
     this.activeNotes.forEach((nv) => nv.updateLive(this.params));
+    this.seqNotes.forEach((nv) => nv.updateLive(this.params));
   }
 
   setEnabled(enabled: boolean): void {
@@ -261,6 +361,24 @@ export class Voice {
             <select class="control" data-p="noteOffsetDivision"></select>
           </div>
           <div class="knob-grid" data-group="noteoffset-knobs"></div>
+        </div>
+
+        <div class="section collapsible collapsed" data-section="seq">
+          <div class="section-label-row">
+            <button class="icon-btn toggle off" title="Enable/disable step sequencer" data-act="toggle-seq">●</button>
+            <button type="button" class="section-label section-toggle" data-act="toggle-seq-panel" aria-expanded="false">
+              Sequencer <span class="chev">▾</span>
+            </button>
+          </div>
+          <div class="section-content">
+            <div class="seq-controls">
+              <div class="row-select">
+                <select class="control" data-p="seqDivision" title="Step length"></select>
+              </div>
+              <div data-group="seq-length"></div>
+            </div>
+            <div class="seq-grid" data-group="seq-steps"></div>
+          </div>
         </div>
 
         <div class="section">
@@ -542,6 +660,8 @@ export class Voice {
     });
     paintNoteOffsetToggle();
 
+    this._buildSequencerControls();
+
     const adsr = panel.querySelector<HTMLElement>('[data-group="adsr"]')!;
     this._mk(adsr, {
       label: 'ATK',
@@ -761,6 +881,86 @@ export class Voice {
     });
 
     this._paintEnabled();
+  }
+
+  private _buildSequencerControls(): void {
+    const p = this.params;
+    const panel = this.panelEl;
+
+    const seqToggleBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-seq"]')!;
+    const paintSeqEnabled = () => this._paintToggle(seqToggleBtn, p.seqEnabled);
+    seqToggleBtn.addEventListener('click', () => {
+      p.seqEnabled = !p.seqEnabled;
+      paintSeqEnabled();
+      this._applySeqEnabled();
+      scheduleAutoSave();
+    });
+    paintSeqEnabled();
+    const seqSection = panel.querySelector<HTMLElement>('[data-section="seq"]')!;
+    const seqPanelBtn = panel.querySelector<HTMLButtonElement>('[data-act="toggle-seq-panel"]')!;
+    seqPanelBtn.addEventListener('click', () => {
+      const collapsed = seqSection.classList.toggle('collapsed');
+      seqSection.classList.toggle('expanded', !collapsed);
+      seqPanelBtn.setAttribute('aria-expanded', String(!collapsed));
+    });
+
+    this._wireDivisionSelect(
+      '[data-p="seqDivision"]',
+      () => p.seqDivision,
+      (v) => (p.seqDivision = v),
+    );
+
+    const paintLength = () => this._seqStepEls.forEach((el, i) => el.classList.toggle('inactive', i >= p.seqLength));
+    this._mk(panel.querySelector<HTMLElement>('[data-group="seq-length"]')!, {
+      label: 'LEN',
+      min: 1,
+      max: SEQ_MAX_STEPS,
+      value: p.seqLength,
+      default: 8,
+      step: 1,
+      size: 40,
+      formatter: (v) => String(Math.round(v)),
+      onChange: (v) => {
+        p.seqLength = Math.round(v);
+        paintLength();
+      },
+    });
+
+    const grid = panel.querySelector<HTMLElement>('[data-group="seq-steps"]')!;
+    this._seqStepEls = p.seqSteps.map((step, i) => {
+      const cell = document.createElement('div');
+      cell.className = 'seq-step';
+      const btn = document.createElement('button');
+      btn.className = 'icon-btn toggle';
+      btn.title = `Step ${i + 1} on/off`;
+      btn.textContent = '●';
+      this._paintToggle(btn, step.on);
+      btn.addEventListener('click', () => {
+        step.on = !step.on;
+        this._paintToggle(btn, step.on);
+        scheduleAutoSave();
+      });
+      cell.appendChild(btn);
+      this._mk(cell, {
+        min: -SEQ_SEMITONE_RANGE,
+        max: SEQ_SEMITONE_RANGE,
+        value: step.semitones,
+        default: 0,
+        step: 1,
+        size: 26,
+        formatter: (v) => (v > 0 ? '+' : '') + Math.round(v),
+        onChange: (v) => {
+          step.semitones = Math.round(v);
+        },
+      });
+      grid.appendChild(cell);
+      return cell;
+    });
+    paintLength();
+  }
+
+  private _paintStepCurrent(index: number): void {
+    this._seqStepEls.forEach((el, i) => el.classList.toggle('current', i === index));
   }
 
   private _mk(container: Element, opts: KnobOptions): Knob {

@@ -20,6 +20,16 @@ function readLfoSettings(p: VoiceParams, slot: LfoSlot): LfoSettings {
   return { target: p.lfo2Target, rateMode: p.lfo2RateMode, rateHz: p.lfo2RateHz, rateDivision: p.lfo2RateDivision, depth: p.lfo2Depth };
 }
 
+/** Freezes `param` at whatever value it has at `time`, dropping later automation, so a new ramp can start from there. */
+function holdAt(param: AudioParam, time: number, currentTime: number): void {
+  if (time > currentTime && typeof param.cancelAndHoldAtTime === 'function') {
+    param.cancelAndHoldAtTime(time);
+    return;
+  }
+  param.cancelScheduledValues(time);
+  param.setValueAtTime(param.value, time);
+}
+
 interface LfoState {
   lfo: OscillatorNode;
   depth: GainNode;
@@ -29,7 +39,12 @@ interface LfoState {
 
 export class NoteVoice {
   voice: Voice;
+  /** the held (keyboard/MIDI) note this voice belongs to */
   note: number;
+  /** extra semitones on top of `note` (step-sequencer step offset) */
+  semitoneOffset: number;
+  /** audio-clock time the note starts sounding (may be in the near future when scheduled by the sequencer) */
+  startTime: number;
   releasing = false;
   pitchSemitones: number;
   src: OscillatorNode | AudioBufferSourceNode;
@@ -45,16 +60,18 @@ export class NoteVoice {
   lfo1: LfoState;
   lfo2: LfoState | null;
 
-  constructor(voice: Voice, note: number, velocity: number) {
+  constructor(voice: Voice, note: number, velocity: number, when?: number, semitoneOffset = 0) {
     const ctx = Engine.ctx!,
-      now = ctx.currentTime,
+      now = Math.max(ctx.currentTime, when ?? 0),
       p = voice.params;
     this.voice = voice;
     this.note = note;
+    this.semitoneOffset = semitoneOffset;
+    this.startTime = now;
     this.pitchSemitones = p.pitch || 0;
 
     /* source */
-    const freq1 = noteToFreq(note) * Math.pow(2, (p.pitch || 0) / 12);
+    const freq1 = noteToFreq(this._playedNote()) * Math.pow(2, (p.pitch || 0) / 12);
     const src = this._createOscSource(p.osc, p.pulseWidth, freq1);
     this.src = src;
 
@@ -81,7 +98,7 @@ export class NoteVoice {
     const fenv2Gain = ctx.createGain();
     fenv2Gain.gain.value = p.filter2EnvDepth;
     fenv.connect(fenv2Gain).connect(filter2.frequency);
-    fenv.start();
+    fenv.start(now);
     this.fenv = fenv;
     this.fenvGain = fenvGain;
     this.fenv2Gain = fenv2Gain;
@@ -94,7 +111,7 @@ export class NoteVoice {
     src.connect(filter);
     this._connectFilterChain(this.filter2Enabled);
     amp.connect(voice.bus);
-    src.start();
+    src.start(now);
 
     /* Dual LFOs (LFO2 only allocated when explicitly enabled) */
     this.lfo1 = this._createLfo('lfo', p);
@@ -158,13 +175,17 @@ export class NoteVoice {
     return wave;
   }
 
+  private _playedNote(): number {
+    return this.note + this.semitoneOffset;
+  }
+
   private _addOsc2(p: VoiceParams): void {
-    const freq2 = noteToFreq(this.note) * Math.pow(2, (p.osc2Pitch || 0) / 12);
+    const freq2 = noteToFreq(this._playedNote()) * Math.pow(2, (p.osc2Pitch || 0) / 12);
     const osc2Src = this._createOscSource(p.osc2, p.osc2PulseWidth, freq2);
     const osc2Gain = Engine.ctx!.createGain();
     osc2Gain.gain.value = p.osc2Level;
     osc2Src.connect(osc2Gain).connect(this.filter);
-    osc2Src.start();
+    osc2Src.start(Math.max(this.startTime, Engine.ctx!.currentTime));
     this.osc2Src = osc2Src;
     this.osc2Gain = osc2Gain;
     this._reconnectLfoTargets();
@@ -304,7 +325,7 @@ export class NoteVoice {
     const ctx = Engine.ctx!,
       now = ctx.currentTime;
     if ('frequency' in this.src && this.note != null) {
-      const baseFreq = noteToFreq(this.note) * Math.pow(2, (p.pitch || 0) / 12);
+      const baseFreq = noteToFreq(this._playedNote()) * Math.pow(2, (p.pitch || 0) / 12);
       this.src.frequency.setTargetAtTime(baseFreq, now, 0.03);
     }
     if (!!p.osc2Enabled !== !!this.osc2Src) {
@@ -315,7 +336,7 @@ export class NoteVoice {
       }
     }
     if (this.osc2Src && 'frequency' in this.osc2Src) {
-      const base2Freq = noteToFreq(this.note) * Math.pow(2, (p.osc2Pitch || 0) / 12);
+      const base2Freq = noteToFreq(this._playedNote()) * Math.pow(2, (p.osc2Pitch || 0) / 12);
       this.osc2Src.frequency.setTargetAtTime(base2Freq, now, 0.03);
     }
     if (this.osc2Gain) {
@@ -350,18 +371,17 @@ export class NoteVoice {
     }
   }
 
-  release(): void {
+  /** Starts the release stage at `when` (default: now); a future `when` lets the sequencer schedule gate ends sample-accurately. */
+  release(when?: number): void {
     if (this.releasing) return;
     this.releasing = true;
     const ctx = Engine.ctx!,
-      now = ctx.currentTime,
+      now = Math.max(ctx.currentTime, this.startTime, when ?? 0),
       p = this.voice.params;
     const rel = Math.max(0.02, p.release);
-    this.amp.gain.cancelScheduledValues(now);
-    this.amp.gain.setValueAtTime(this.amp.gain.value, now);
+    holdAt(this.amp.gain, now, ctx.currentTime);
     this.amp.gain.linearRampToValueAtTime(0, now + rel);
-    this.fenv.offset.cancelScheduledValues(now);
-    this.fenv.offset.setValueAtTime(this.fenv.offset.value, now);
+    holdAt(this.fenv.offset, now, ctx.currentTime);
     this.fenv.offset.linearRampToValueAtTime(0, now + rel);
     const stopAt = now + rel + 0.05;
     try {
@@ -393,7 +413,7 @@ export class NoteVoice {
     } catch {
       /* already stopped */
     }
-    setTimeout(() => this._cleanup(), (rel + 0.15) * 1000);
+    setTimeout(() => this._cleanup(), (now - ctx.currentTime + rel + 0.15) * 1000);
   }
 
   forceStop(): void {

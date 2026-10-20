@@ -79,7 +79,25 @@ class EngineController {
     if (this.ctx && this.ctx.state !== 'running') this.ctx.resume();
   }
 
+  /** beat clock anchor: beatAt(t) = beatAnchorBeat + (t - beatAnchorTime) * bpm / 60 */
+  private beatAnchorTime = 0;
+  private beatAnchorBeat = 0;
+
+  /** Global beat position (in quarter-note beats) at audio-clock time `t`; continuous across tempo changes. */
+  beatAt(t: number): number {
+    return this.beatAnchorBeat + ((t - this.beatAnchorTime) * this.bpm) / 60;
+  }
+
+  timeAtBeat(beat: number): number {
+    return this.beatAnchorTime + ((beat - this.beatAnchorBeat) * 60) / this.bpm;
+  }
+
   setBpm(bpm: number): void {
+    if (this.ctx) {
+      const now = this.ctx.currentTime;
+      this.beatAnchorBeat = this.beatAt(now);
+      this.beatAnchorTime = now;
+    }
     this.bpm = bpm;
     this.syncedLfos.forEach((entry) => {
       if (entry.mode !== 'sync') return;
